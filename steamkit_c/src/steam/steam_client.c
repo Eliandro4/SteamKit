@@ -1,0 +1,179 @@
+#include "steamkit/steam/steam_client.h"
+#include "steamkit/steam/cm_client.h"
+#include "steamkit/steam/steam_client/configuration/steam_configuration.h"
+#include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/base/packet_base.h"
+#include "steamkit/utils/debug_log.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+struct sk_steam_client {
+    sk_cm_client_t* base;
+    sk_client_msg_handler_t** handlers;
+    size_t handler_count;
+    size_t handler_capacity;
+    sk_job_id_t* next_job_id;
+};
+
+sk_steam_client_t* sk_steam_client_create(void) {
+    return sk_steam_client_create_with_config(NULL);
+}
+
+sk_steam_client_t* sk_steam_client_create_with_config(sk_steam_configuration_t* config) {
+    if (!config) {
+        config = sk_steam_configuration_create_default();
+        if (!config) return NULL;
+    }
+    sk_steam_client_t* client = (sk_steam_client_t*)calloc(1, sizeof(sk_steam_client_t));
+    if (!client) {
+        sk_steam_configuration_destroy(config);
+        return NULL;
+    }
+    client->base = sk_cm_client_create(config, "default");
+    if (!client->base) {
+        free(client);
+        sk_steam_configuration_destroy(config);
+        return NULL;
+    }
+    sk_cm_client_set_steam_client(client->base, client);
+    client->handler_capacity = 16;
+    client->handlers = (struct sk_client_msg_handler**)calloc(client->handler_capacity, sizeof(struct sk_client_msg_handler*));
+    if (!client->handlers) {
+        sk_cm_client_destroy(client->base);
+        free(client);
+        sk_steam_configuration_destroy(config);
+        return NULL;
+    }
+    return client;
+}
+
+void sk_steam_client_destroy(sk_steam_client_t* client) {
+    if (!client) return;
+    sk_cm_client_disconnect(client->base, true);
+    for (size_t i = 0; i < client->handler_count; ++i) {
+        free(client->handlers[i]);
+    }
+    free(client->handlers);
+    free(client->next_job_id);
+    sk_cm_client_destroy(client->base);
+    free(client);
+}
+
+void sk_steam_client_connect(sk_steam_client_t* client) {
+    if (!client) return;
+    sk_cm_client_connect(client->base);
+}
+
+void sk_steam_client_disconnect(sk_steam_client_t* client, bool user_initiated) {
+    if (!client) return;
+    sk_cm_client_disconnect(client->base, user_initiated);
+}
+
+bool sk_steam_client_is_connected(const sk_steam_client_t* client) {
+    return client ? sk_cm_client_is_connected(client->base) : false;
+}
+
+sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client) {
+    if (!client) return NULL;
+    static uint64_t sequence = 0;
+    sequence++;
+    return sk_job_id_create(sequence);
+}
+
+void sk_steam_client_log_on(sk_steam_client_t* client, const char* username, const char* password) {
+    if (!client || !username) return;
+    if (!sk_steam_client_is_connected(client)) {
+        sk_debug_log_warn("SteamClient", "Cannot log on: not connected");
+        return;
+    }
+
+    sk_client_msg_t* msg = sk_client_msg_create(SK_EMSG_CLIENT_LOG_ON, false);
+    if (!msg) return;
+
+    sk_client_msg_set_session_id(msg, 1);
+
+    uint8_t body[8] = {0};
+    size_t ulen = strlen(username);
+    if (ulen > 7) ulen = 7;
+    memcpy(body, username, ulen);
+    sk_client_msg_set_data(msg, body, sizeof(body));
+
+    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg(msg);
+    if (pkt) {
+        size_t data_len = 0;
+        const uint8_t* pkt_data = sk_packet_msg_data(pkt, &data_len);
+        if (pkt_data && data_len > 0) {
+            uint8_t* wire = (uint8_t*)malloc(4 + data_len);
+            if (wire) {
+                uint32_t len = (uint32_t)data_len;
+                wire[0] = len & 0xFF;
+                wire[1] = (len >> 8) & 0xFF;
+                wire[2] = (len >> 16) & 0xFF;
+                wire[3] = (len >> 24) & 0xFF;
+                memcpy(wire + 4, pkt_data, data_len);
+                sk_connection_send(sk_cm_client_connection(client->base), wire, 4 + data_len);
+                free(wire);
+            }
+        }
+        sk_packet_msg_destroy(pkt);
+    }
+
+    sk_client_msg_destroy(msg);
+    sk_debug_log_info("SteamClient", "Logon requested for user: %s", username);
+}
+
+void sk_steam_client_log_off(sk_steam_client_t* client) {
+    if (!client || !sk_steam_client_is_connected(client)) return;
+
+    sk_client_msg_t* msg = sk_client_msg_create(SK_EMSG_CLIENT_LOG_OFF, false);
+    if (!msg) return;
+
+    sk_client_msg_set_session_id(msg, 1);
+
+    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg(msg);
+    if (pkt) {
+        size_t data_len = 0;
+        const uint8_t* pkt_data = sk_packet_msg_data(pkt, &data_len);
+        if (pkt_data && data_len > 0) {
+            uint8_t* wire = (uint8_t*)malloc(4 + data_len);
+            if (wire) {
+                uint32_t len = (uint32_t)data_len;
+                wire[0] = len & 0xFF;
+                wire[1] = (len >> 8) & 0xFF;
+                wire[2] = (len >> 16) & 0xFF;
+                wire[3] = (len >> 24) & 0xFF;
+                memcpy(wire + 4, pkt_data, data_len);
+                sk_connection_send(sk_cm_client_connection(client->base), wire, 4 + data_len);
+                free(wire);
+            }
+        }
+        sk_packet_msg_destroy(pkt);
+    }
+
+    sk_client_msg_destroy(msg);
+    sk_debug_log_info("SteamClient", "Logoff requested");
+}
+
+void sk_steam_client_add_handler(sk_steam_client_t* client, struct sk_client_msg_handler* handler) {
+    if (!client || !handler) return;
+    if (client->handler_count >= client->handler_capacity) {
+        size_t new_cap = client->handler_capacity * 2;
+        sk_client_msg_handler_t** new_handlers = (sk_client_msg_handler_t**)realloc(
+            client->handlers, new_cap * sizeof(struct sk_client_msg_handler*));
+        if (!new_handlers) return;
+        client->handlers = new_handlers;
+        client->handler_capacity = new_cap;
+    }
+    client->handlers[client->handler_count++] = handler;
+}
+
+void sk_steam_client_dispatch_msg(sk_steam_client_t* client, const sk_packet_msg_t* packet_msg) {
+    if (!client || !packet_msg) return;
+    for (size_t i = 0; i < client->handler_count; ++i) {
+        if (client->handlers[i] && client->handlers[i]->handle_msg) {
+            client->handlers[i]->handle_msg(client->handlers[i], packet_msg);
+        }
+    }
+}
