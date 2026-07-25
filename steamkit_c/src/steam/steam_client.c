@@ -84,76 +84,12 @@ sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client) {
 
 void sk_steam_client_log_on(sk_steam_client_t* client, const char* username, const char* password) {
     if (!client || !username) return;
-    if (!sk_steam_client_is_connected(client)) {
-        sk_debug_log_warn("SteamClient", "Cannot log on: not connected");
-        return;
-    }
-
-    sk_client_msg_t* msg = sk_client_msg_create(SK_EMSG_CLIENT_LOG_ON, false);
-    if (!msg) return;
-
-    sk_client_msg_set_session_id(msg, 1);
-
-    uint8_t body[8] = {0};
-    size_t ulen = strlen(username);
-    if (ulen > 7) ulen = 7;
-    memcpy(body, username, ulen);
-    sk_client_msg_set_data(msg, body, sizeof(body));
-
-    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg(msg);
-    if (pkt) {
-        size_t data_len = 0;
-        const uint8_t* pkt_data = sk_packet_msg_data(pkt, &data_len);
-        if (pkt_data && data_len > 0) {
-            uint8_t* wire = (uint8_t*)malloc(4 + data_len);
-            if (wire) {
-                uint32_t len = (uint32_t)data_len;
-                wire[0] = len & 0xFF;
-                wire[1] = (len >> 8) & 0xFF;
-                wire[2] = (len >> 16) & 0xFF;
-                wire[3] = (len >> 24) & 0xFF;
-                memcpy(wire + 4, pkt_data, data_len);
-                sk_connection_send(sk_cm_client_connection(client->base), wire, 4 + data_len);
-                free(wire);
-            }
-        }
-        sk_packet_msg_destroy(pkt);
-    }
-
-    sk_client_msg_destroy(msg);
-    sk_debug_log_info("SteamClient", "Logon requested for user: %s", username);
+    sk_debug_log_warn("SteamClient", "sk_steam_client_log_on is deprecated. Use sk_steam_user_log_on instead.");
 }
 
 void sk_steam_client_log_off(sk_steam_client_t* client) {
-    if (!client || !sk_steam_client_is_connected(client)) return;
-
-    sk_client_msg_t* msg = sk_client_msg_create(SK_EMSG_CLIENT_LOG_OFF, false);
-    if (!msg) return;
-
-    sk_client_msg_set_session_id(msg, 1);
-
-    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg(msg);
-    if (pkt) {
-        size_t data_len = 0;
-        const uint8_t* pkt_data = sk_packet_msg_data(pkt, &data_len);
-        if (pkt_data && data_len > 0) {
-            uint8_t* wire = (uint8_t*)malloc(4 + data_len);
-            if (wire) {
-                uint32_t len = (uint32_t)data_len;
-                wire[0] = len & 0xFF;
-                wire[1] = (len >> 8) & 0xFF;
-                wire[2] = (len >> 16) & 0xFF;
-                wire[3] = (len >> 24) & 0xFF;
-                memcpy(wire + 4, pkt_data, data_len);
-                sk_connection_send(sk_cm_client_connection(client->base), wire, 4 + data_len);
-                free(wire);
-            }
-        }
-        sk_packet_msg_destroy(pkt);
-    }
-
-    sk_client_msg_destroy(msg);
-    sk_debug_log_info("SteamClient", "Logoff requested");
+    if (!client) return;
+    sk_debug_log_warn("SteamClient", "sk_steam_client_log_off is deprecated. Use sk_steam_user_log_off instead.");
 }
 
 void sk_steam_client_add_handler(sk_steam_client_t* client, struct sk_client_msg_handler* handler) {
@@ -175,5 +111,14 @@ void sk_steam_client_dispatch_msg(sk_steam_client_t* client, const sk_packet_msg
         if (client->handlers[i] && client->handlers[i]->handle_msg) {
             client->handlers[i]->handle_msg(client->handlers[i], packet_msg);
         }
+    }
+}
+
+void sk_steam_client_send(sk_steam_client_t* client, sk_packet_msg_t* packet_msg) {
+    if (!client || !packet_msg) return;
+    size_t data_len = 0;
+    const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+    if (data && data_len > 0) {
+        sk_connection_send(sk_cm_client_connection(client->base), data, data_len);
     }
 }

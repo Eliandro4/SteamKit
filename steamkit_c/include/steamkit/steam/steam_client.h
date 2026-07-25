@@ -46,6 +46,9 @@ void sk_steam_client_add_handler(struct sk_steam_client* client, struct sk_clien
 // Dispatches a packet message to all handlers
 void sk_steam_client_dispatch_msg(struct sk_steam_client* client, const sk_packet_msg_t* packet_msg);
 
+// Sends a packet message to the network
+void sk_steam_client_send(sk_steam_client_t* client, sk_packet_msg_t* packet_msg);
+
 // Logs on to Steam
 void sk_steam_client_log_on(sk_steam_client_t* client, const char* username, const char* password);
 

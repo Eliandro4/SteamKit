@@ -5,6 +5,8 @@
 #include "steamkit/utils/debug_log.h"
 #include "steamkit/utils/msg_util.h"
 #include "steamkit/base/generated/steam_msg_user.h"
+#include "steamkit/steam/handlers/client_msg_protobuf.h"
+#include "steammessages_clientserver_login.pb-c.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -55,10 +57,6 @@ static void sk_steam_user_handle_msg(struct sk_client_msg_handler* handler, cons
             }
             break;
         }
-        case SK_EMSG_CLIENT_PERSONAS: {
-            sk_debug_log_info("SteamUser", "Received personas list");
-            break;
-        }
         default:
             break;
     }
@@ -95,13 +93,79 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
     user->logon_details->access_token = details->access_token ? sk_strdup(details->access_token) : NULL;
     user->logon_details->account_instance = details->account_instance;
     user->logon_details->machine_name = details->machine_name ? sk_strdup(details->machine_name) : NULL;
+
+    if (!user->base.client) {
+        sk_debug_log_warn("SteamUser", "No SteamClient attached, cannot send logon message.");
+        return;
+    }
+
+    sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_CLIENT_LOG_ON);
+    if (!msg) return;
+
+    CMsgClientLogon logon_msg = CMSG_CLIENT_LOGON__INIT;
+    logon_msg.account_name = user->logon_details->username;
+    logon_msg.password = user->logon_details->password;
     
-    sk_debug_log_info("SteamUser", "Logon requested for user: %s", details->username ? details->username : "(null)");
+    if (user->logon_details->machine_name) {
+        logon_msg.machine_name = user->logon_details->machine_name;
+    }
+
+    if (user->logon_details->cell_id != 0) {
+        logon_msg.has_cell_id = true;
+        logon_msg.cell_id = user->logon_details->cell_id;
+    }
+    
+    if (user->logon_details->access_token) {
+        logon_msg.web_logon_nonce = user->logon_details->access_token;
+    }
+    
+    if (user->logon_details->two_factor_code) {
+        logon_msg.two_factor_code = user->logon_details->two_factor_code;
+    }
+    
+    if (user->logon_details->auth_code) {
+        logon_msg.auth_code = user->logon_details->auth_code;
+    }
+
+    logon_msg.protocol_version = 65580;
+    logon_msg.has_protocol_version = true;
+    logon_msg.client_os_type = 10;
+    logon_msg.has_client_os_type = true;
+    
+    size_t packed_size = cmsg_client_logon__get_packed_size(&logon_msg);
+    uint8_t* packed_buf = (uint8_t*)malloc(packed_size);
+    if (packed_buf) {
+        cmsg_client_logon__pack(&logon_msg, packed_buf);
+        sk_client_msg_protobuf_set_body(msg, packed_buf, packed_size);
+        free(packed_buf);
+    }
+    
+    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg_protobuf(msg);
+    if (pkt) {
+        sk_steam_client_send(user->base.client, pkt);
+        sk_packet_msg_destroy(pkt);
+    }
+    
+    sk_client_msg_protobuf_destroy(msg);
+    sk_debug_log_info("SteamUser", "Logon message sent for user: %s", details->username ? details->username : "(null)");
 }
 
 void sk_steam_user_log_off(sk_steam_user_t* user) {
     if (!user) return;
     sk_debug_log_info("SteamUser", "Logoff requested");
+    
+    if (user->base.client) {
+        sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_CLIENT_LOG_OFF);
+        if (msg) {
+            sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg_protobuf(msg);
+            if (pkt) {
+                sk_steam_client_send(user->base.client, pkt);
+                sk_packet_msg_destroy(pkt);
+            }
+            sk_client_msg_protobuf_destroy(msg);
+        }
+    }
+    
     if (user->logon_details) {
         sk_log_on_details_destroy(user->logon_details);
         user->logon_details = NULL;

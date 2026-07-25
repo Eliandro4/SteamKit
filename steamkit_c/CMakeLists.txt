@@ -13,7 +13,6 @@ option(SK_ENABLE_CURL "Enable libcurl for HTTP/WebSocket" OFF)
 option(SK_ENABLE_ZLIB "Enable zlib for compression" OFF)
 option(SK_ENABLE_LZMA "Enable LZMA support" OFF)
 option(SK_ENABLE_ZSTD "Enable Zstandard support" OFF)
-option(SK_ENABLE_PROTOBUF_C "Enable protobuf-c support" OFF)
 option(SK_BUILD_SAMPLES "Build samples" OFF)
 option(SK_BUILD_TESTS "Build tests" OFF)
 
@@ -39,6 +38,7 @@ set(SK_SOURCES
     src/steam/steam_client.c
     src/steam/callbacks.c
     src/steam/handlers/client_msg_handler.c
+    src/steam/handlers/client_msg_protobuf.c
     src/steam/handlers/steam_friends.c
     src/steam/handlers/steam_user.c
     src/steam/handlers/steam_apps.c
@@ -66,8 +66,12 @@ set(SK_SOURCES
     src/cdn/cdn_client.c
 )
 
+file(GLOB PROTOBUF_SOURCES "src/protobufs/*.c")
+list(APPEND SK_SOURCES ${PROTOBUF_SOURCES})
+
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/protobufs
 )
 
 add_library(steamkit_c STATIC ${SK_SOURCES})
@@ -99,12 +103,12 @@ if(SK_ENABLE_ZLIB)
     target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_ZLIB=1)
 endif()
 
-# Optional: protobuf-c
-if(SK_ENABLE_PROTOBUF_C)
-    find_package(protobuf-c REQUIRED)
-    target_link_libraries(steamkit_c PUBLIC protobuf-c::libprotobuf-c)
-    target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_PROTOBUF_C=1)
-endif()
+# Require protobuf-c for real networking
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PROTOBUF_C REQUIRED libprotobuf-c)
+include_directories(${PROTOBUF_C_INCLUDE_DIRS})
+target_link_libraries(steamkit_c PUBLIC ${PROTOBUF_C_LIBRARIES})
+target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_PROTOBUF_C=1)
 
 # Build samples
 if(SK_BUILD_SAMPLES)

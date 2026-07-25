@@ -45,12 +45,12 @@ static void sk_steam_friends_handle_msg(struct sk_client_msg_handler* handler, c
             sk_debug_log_info("SteamFriends", "Received chat invite");
             break;
         }
-        case SK_EMSG_CLIENT_CHAT_JOIN: {
-            sk_debug_log_info("SteamFriends", "Received chat join");
+        case SK_EMSG_CLIENT_JOIN_CHAT: {
+            sk_debug_log_info("SteamFriends", "Received join chat");
             break;
         }
-        case SK_EMSG_CLIENT_CHAT_LEAVE: {
-            sk_debug_log_info("SteamFriends", "Received chat leave");
+        case SK_EMSG_CLIENT_CHAT_MEMBER_INFO: {
+            sk_debug_log_info("SteamFriends", "Received chat member info");
             break;
         }
         default:

@@ -8,24 +8,11 @@
 #include <stdbool.h>
 
 static void sk_steam_cloud_handle_msg(struct sk_client_msg_handler* handler, const sk_packet_msg_t* packet_msg) {
+    // Steam Cloud (RemoteStorage) in modern Steam is HTTP-based (via ISteamRemoteStorage WebAPI).
+    // There is no EMsg-based cloud file transfer in the current SteamKit2 SteamCloud handler.
+    // This handler is intentionally empty; cloud file ops are handled via HTTP separately.
     (void)handler;
-    if (!packet_msg) return;
-
-    uint32_t msg_type = sk_packet_msg_msg_type(packet_msg);
-    switch (msg_type) {
-        case SK_EMSG_CLIENT_CLOUD_FILE_DOWNLOAD:
-        case SK_EMSG_CLIENT_CLOUD_FILE_UPLOAD:
-        case SK_EMSG_CLIENT_CLOUD_FILE_ENUMERATE: {
-            sk_debug_log_info("SteamCloud", "Received cloud file operation");
-            break;
-        }
-        case SK_EMSG_CLIENT_CLOUD_FILE_RESPONSE: {
-            sk_debug_log_info("SteamCloud", "Received cloud file response");
-            break;
-        }
-        default:
-            break;
-    }
+    (void)packet_msg;
 }
 
 typedef struct sk_steam_cloud {
