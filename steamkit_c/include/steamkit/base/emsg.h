@@ -113,7 +113,7 @@ static inline bool sk_emsg_is_client_to_server(sk_emsg_t msg) {
 
 static inline bool sk_emsg_is_server_to_client(sk_emsg_t msg) {
     return (msg >= 750 && msg <= 860) ||
-           (msg >= 5439 && msg <= 5439) ||
+           (msg >= 5439 && msg <= 5453) ||
            (msg >= 8902 && msg <= 8908);
 }
 

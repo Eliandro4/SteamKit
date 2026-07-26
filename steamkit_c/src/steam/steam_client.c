@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "steamkit/steam/steam_client.h"
 #include "steamkit/steam/cm_client.h"
 #include "steamkit/steam/steam_client/configuration/steam_configuration.h"
@@ -8,6 +9,14 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
+
+struct sk_callback_entry {
+    uint32_t callback_type;
+    uint64_t job_id;
+    void* data;
+    struct sk_callback_entry* next;
+};
 
 struct sk_steam_client {
     sk_cm_client_t* base;
@@ -15,6 +24,11 @@ struct sk_steam_client {
     size_t handler_count;
     size_t handler_capacity;
     sk_job_id_t* next_job_id;
+
+    struct sk_callback_entry* callback_queue;
+    struct sk_callback_entry* callback_queue_tail;
+    pthread_mutex_t callback_mutex;
+    pthread_cond_t callback_cond;
 };
 
 sk_steam_client_t* sk_steam_client_create(void) {
@@ -46,6 +60,8 @@ sk_steam_client_t* sk_steam_client_create_with_config(sk_steam_configuration_t* 
         sk_steam_configuration_destroy(config);
         return NULL;
     }
+    pthread_mutex_init(&client->callback_mutex, NULL);
+    pthread_cond_init(&client->callback_cond, NULL);
     return client;
 }
 
@@ -57,6 +73,16 @@ void sk_steam_client_destroy(sk_steam_client_t* client) {
     }
     free(client->handlers);
     free(client->next_job_id);
+
+    struct sk_callback_entry* entry = client->callback_queue;
+    while (entry) {
+        struct sk_callback_entry* next = entry->next;
+        free(entry);
+        entry = next;
+    }
+    pthread_mutex_destroy(&client->callback_mutex);
+    pthread_cond_destroy(&client->callback_cond);
+
     sk_cm_client_destroy(client->base);
     free(client);
 }
@@ -105,6 +131,20 @@ void sk_steam_client_add_handler(sk_steam_client_t* client, struct sk_client_msg
     client->handlers[client->handler_count++] = handler;
 }
 
+void* sk_steam_client_get_handler(const sk_steam_client_t* client, int handler_type) {
+    if (!client) return NULL;
+    for (size_t i = 0; i < client->handler_count; ++i) {
+        if (client->handlers[i] && client->handlers[i]->handler_type == handler_type) {
+            return client->handlers[i];
+        }
+    }
+    return NULL;
+}
+
+sk_steam_unified_messages_t* sk_steam_client_get_unified_messages(const sk_steam_client_t* client) {
+    return (sk_steam_unified_messages_t*)sk_steam_client_get_handler(client, SK_HANDLER_STEAM_UNIFIED_MESSAGES);
+}
+
 void sk_steam_client_dispatch_msg(sk_steam_client_t* client, const sk_packet_msg_t* packet_msg) {
     if (!client || !packet_msg) return;
     for (size_t i = 0; i < client->handler_count; ++i) {
@@ -121,4 +161,121 @@ void sk_steam_client_send(sk_steam_client_t* client, sk_packet_msg_t* packet_msg
     if (data && data_len > 0) {
         sk_connection_send(sk_cm_client_connection(client->base), data, data_len);
     }
+}
+
+void sk_steam_client_post_callback(sk_steam_client_t* client, uint32_t callback_type, uint64_t job_id, void* data) {
+    if (!client) return;
+    struct sk_callback_entry* entry = (struct sk_callback_entry*)calloc(1, sizeof(*entry));
+    if (!entry) return;
+    entry->callback_type = callback_type;
+    entry->job_id = job_id;
+    entry->data = data;
+
+    pthread_mutex_lock(&client->callback_mutex);
+    if (client->callback_queue_tail) {
+        client->callback_queue_tail->next = entry;
+    } else {
+        client->callback_queue = entry;
+    }
+    client->callback_queue_tail = entry;
+    pthread_cond_signal(&client->callback_cond);
+    pthread_mutex_unlock(&client->callback_mutex);
+}
+
+void* sk_steam_client_get_next_callback(sk_steam_client_t* client, uint32_t* out_type, uint64_t* out_job_id, int timeout_ms) {
+    if (!client) return NULL;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout_ms / 1000;
+    ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec += ts.tv_nsec / 1000000000L;
+        ts.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&client->callback_mutex);
+    while (!client->callback_queue) {
+        if (pthread_cond_timedwait(&client->callback_cond, &client->callback_mutex, &ts) != 0) {
+            pthread_mutex_unlock(&client->callback_mutex);
+            return NULL;
+        }
+    }
+    struct sk_callback_entry* entry = client->callback_queue;
+    client->callback_queue = entry->next;
+    if (!client->callback_queue) {
+        client->callback_queue_tail = NULL;
+    }
+    pthread_mutex_unlock(&client->callback_mutex);
+
+    if (out_type) *out_type = entry->callback_type;
+    if (out_job_id) *out_job_id = entry->job_id;
+    void* data = entry->data;
+    free(entry);
+    return data;
+}
+
+void* sk_steam_client_wait_for_job(sk_steam_client_t* client, uint64_t job_id, int timeout_ms) {
+    if (!client) return NULL;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout_ms / 1000;
+    ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec += ts.tv_nsec / 1000000000L;
+        ts.tv_nsec %= 1000000000L;
+    }
+
+    pthread_mutex_lock(&client->callback_mutex);
+    struct sk_callback_entry* entry = client->callback_queue;
+    struct sk_callback_entry* prev = NULL;
+    while (entry) {
+        if (entry->job_id == job_id) {
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                client->callback_queue = entry->next;
+            }
+            if (client->callback_queue_tail == entry) {
+                client->callback_queue_tail = prev;
+            }
+            pthread_mutex_unlock(&client->callback_mutex);
+            void* data = entry->data;
+            free(entry);
+            return data;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+
+    while (true) {
+        int rc = pthread_cond_timedwait(&client->callback_cond, &client->callback_mutex, &ts);
+        if (rc != 0) {
+            pthread_mutex_unlock(&client->callback_mutex);
+            return NULL;
+        }
+        entry = client->callback_queue;
+        prev = NULL;
+        while (entry) {
+            if (entry->job_id == job_id) {
+                if (prev) {
+                    prev->next = entry->next;
+                } else {
+                    client->callback_queue = entry->next;
+                }
+                if (client->callback_queue_tail == entry) {
+                    client->callback_queue_tail = prev;
+                }
+                pthread_mutex_unlock(&client->callback_mutex);
+                void* data = entry->data;
+                free(entry);
+                return data;
+            }
+            prev = entry;
+            entry = entry->next;
+        }
+    }
+}
+
+void sk_steam_client_free_callback_data(void* data) {
+    free(data);
 }

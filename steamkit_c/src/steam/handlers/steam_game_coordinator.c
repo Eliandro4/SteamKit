@@ -31,6 +31,7 @@ sk_steam_game_coordinator_t* sk_steam_game_coordinator_create(void) {
     sk_steam_game_coordinator_t* gc = (sk_steam_game_coordinator_t*)calloc(1, sizeof(sk_steam_game_coordinator_t));
     if (gc) {
         gc->base.handle_msg = sk_steam_gc_handle_msg;
+        gc->base.handler_type = SK_HANDLER_STEAM_GC;
     }
     return gc;
 }

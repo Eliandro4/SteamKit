@@ -15,6 +15,7 @@ sk_steam_matchmaking_t* sk_steam_matchmaking_create(void) {
     sk_steam_matchmaking_t* mm = (sk_steam_matchmaking_t*)calloc(1, sizeof(sk_steam_matchmaking_t));
     if (mm) {
         mm->base.handle_msg = sk_steam_mm_handle_msg;
+        mm->base.handler_type = SK_HANDLER_STEAM_MATCHMAKING;
     }
     return mm;
 }

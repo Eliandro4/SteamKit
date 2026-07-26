@@ -58,12 +58,14 @@ set(SK_SOURCES
     src/utils/debug_log.c
     src/utils/net_helpers.c
     src/utils/msg_util.c
+    src/utils/http_client.c
     src/steam/steam_client/configuration/steam_configuration.c
     src/steam/steam_client/callback_mgr/callback_mgr.c
     src/steam/authentication/steam_authentication.c
     src/steam/services/cloud_service.c
     src/cdn/cdn_server.c
     src/cdn/cdn_client.c
+    src/steam/handlers/steam_published_file.c
 )
 
 file(GLOB PROTOBUF_SOURCES "src/protobufs/*.c")

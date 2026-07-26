@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/steam/callbacks.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,25 +12,10 @@ extern "C" {
 
 typedef struct sk_steam_content sk_steam_content_t;
 
-typedef struct sk_cdn_server_list {
-    char** hosts;
-    uint32_t num_servers;
-} sk_cdn_server_list_t;
-
-typedef struct sk_manifest_request_code_callback {
-    uint32_t result;
-    uint64_t request_code;
-} sk_manifest_request_code_callback_t;
-
-typedef struct sk_cdn_auth_token_callback {
-    uint32_t result;
-    char* token;
-} sk_cdn_auth_token_callback_t;
-
 sk_steam_content_t* sk_steam_content_create(void);
 void sk_steam_content_destroy(sk_steam_content_t* content);
 
-sk_cdn_server_list_t* sk_steam_content_get_servers_for_steam_pipe(sk_steam_content_t* content);
+sk_cdn_server_list_callback_t* sk_steam_content_get_servers_for_steam_pipe(sk_steam_content_t* content);
 
 sk_manifest_request_code_callback_t* sk_steam_content_get_manifest_request_code(
     sk_steam_content_t* content,

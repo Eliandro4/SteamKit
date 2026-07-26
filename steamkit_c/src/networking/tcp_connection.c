@@ -143,6 +143,7 @@ static int tcp_connect_internal(sk_tcp_connection_t* tcp, const char* host, uint
         fcntl(sockfd, F_SETFL, flags);
         tcp->sockfd = sockfd;
         tcp->connected = true;
+        tcp->base.is_connected = true;
         strncpy(tcp->host, host, sizeof(tcp->host) - 1);
         tcp->port = port;
         freeaddrinfo(res);
@@ -209,6 +210,7 @@ void sk_tcp_connection_disconnect(sk_tcp_connection_t* tcp, bool user_initiated)
     bool was_connected = tcp->connected;
     tcp->running = false;
     tcp->connected = false;
+    tcp->base.is_connected = false;
 
     if (tcp->sockfd >= 0) {
         shutdown(tcp->sockfd, SHUT_RDWR);

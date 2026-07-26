@@ -24,6 +24,7 @@ typedef struct sk_connection {
     sk_connection_net_msg_fn net_msg_callback;
     sk_connection_connected_fn connected_callback;
     sk_connection_disconnected_fn disconnected_callback;
+    bool is_connected;
 } sk_connection_t;
 
 // Connection interface functions

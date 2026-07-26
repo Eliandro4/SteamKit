@@ -30,8 +30,7 @@ sk_protocol_type_t sk_connection_protocol_type(const sk_connection_t* conn) {
 }
 
 bool sk_connection_is_connected(const sk_connection_t* conn) {
-    (void)conn;
-    return false;
+    return conn ? conn->is_connected : false;
 }
 
 void sk_connection_set_callbacks(sk_connection_t* conn,

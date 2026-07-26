@@ -66,6 +66,7 @@ sk_steam_friends_t* sk_steam_friends_create(void) {
     sk_steam_friends_t* friends = (sk_steam_friends_t*)calloc(1, sizeof(sk_steam_friends_t));
     if (friends) {
         friends->base.handle_msg = sk_steam_friends_handle_msg;
+        friends->base.handler_type = SK_HANDLER_STEAM_FRIENDS;
     }
     return friends;
 }

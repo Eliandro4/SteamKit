@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +36,7 @@ typedef struct sk_auth_session_details {
 typedef struct sk_auth_poll_result {
     char* account_name;
     char* refresh_token;
+    char* access_token;
     char* new_guard_data;
 } sk_auth_poll_result_t;
 
@@ -62,6 +64,13 @@ void sk_qr_auth_session_destroy(sk_qr_auth_session_t* session);
 sk_credentials_auth_session_t* sk_auth_begin_session_via_credentials(sk_steam_authentication_t* auth, const sk_auth_session_details_t* details);
 sk_auth_poll_result_t* sk_credentials_auth_session_poll_wait_for_result(sk_credentials_auth_session_t* session);
 void sk_credentials_auth_session_destroy(sk_credentials_auth_session_t* session);
+
+// Poll authentication session status via unified messages
+// Returns raw response body bytes (caller must free with free()), or NULL on timeout/failure.
+// out_body_len receives the length of the response body if non-NULL.
+uint8_t* sk_auth_poll_auth_session_status(sk_steam_client_t* client,
+    uint64_t client_id, const uint8_t* request_id, size_t request_id_len,
+    size_t* out_body_len);
 
 // Result lifecycle
 void sk_auth_poll_result_destroy(sk_auth_poll_result_t* result);

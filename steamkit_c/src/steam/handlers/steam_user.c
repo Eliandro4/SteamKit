@@ -7,10 +7,16 @@
 #include "steamkit/base/generated/steam_msg_user.h"
 #include "steamkit/steam/handlers/client_msg_protobuf.h"
 #include "steammessages_clientserver_login.pb-c.h"
+#include "steammessages_clientserver.pb-c.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+typedef struct sk_steam_user {
+    struct sk_client_msg_handler base;
+    sk_log_on_details_t* logon_details;
+} sk_steam_user_t;
 
 static char* sk_strdup(const char* s) {
     if (!s) return NULL;
@@ -20,25 +26,9 @@ static char* sk_strdup(const char* s) {
     return dup;
 }
 
-sk_log_on_details_t* sk_log_on_details_create(void) {
-    return (sk_log_on_details_t*)calloc(1, sizeof(sk_log_on_details_t));
-}
-
-void sk_log_on_details_destroy(sk_log_on_details_t* details) {
-    if (!details) return;
-    free(details->username);
-    free(details->password);
-    free(details->auth_code);
-    free(details->two_factor_code);
-    free(details->access_token);
-    free(details->machine_name);
-    free(details);
-}
-
 static void sk_steam_user_handle_msg(struct sk_client_msg_handler* handler, const sk_packet_msg_t* packet_msg) {
     if (!handler || !packet_msg) return;
 
-    typedef struct sk_steam_user sk_steam_user_t;
     sk_steam_user_t* user = (sk_steam_user_t*)handler;
 
     uint32_t msg_type = sk_packet_msg_msg_type(packet_msg);
@@ -57,22 +47,94 @@ static void sk_steam_user_handle_msg(struct sk_client_msg_handler* handler, cons
             }
             break;
         }
+        case SK_EMSG_CLIENT_LOGON_RESPONSE: {
+            sk_debug_log_info("SteamUser", "Received logon response");
+            size_t data_len = 0;
+            const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+            CMsgClientLogonResponse* resp = cmsg_client_logon_response__unpack(NULL, data_len, data);
+            if (resp) {
+                sk_logged_on_callback_t* cb = sk_logged_on_callback_create(resp->eresult);
+                if (cb && user->base.client) {
+                    sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_LOGGED_ON, 0, cb);
+                }
+                cmsg_client_logon_response__free_unpacked(resp, NULL);
+            }
+            break;
+        }
+        case SK_EMSG_CLIENT_LOGGED_OFF: {
+            sk_debug_log_info("SteamUser", "Received logged off");
+            size_t data_len = 0;
+            const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+            CMsgClientLoggedOff* logged_off = cmsg_client_logged_off__unpack(NULL, data_len, data);
+            if (logged_off) {
+                sk_logged_off_callback_t* cb = sk_logged_off_callback_create(logged_off->eresult);
+                if (cb && user->base.client) {
+                    sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_LOGGED_OFF, 0, cb);
+                }
+                cmsg_client_logged_off__free_unpacked(logged_off, NULL);
+            }
+            break;
+        }
+        case SK_EMSG_CLIENT_SESSION_TOKEN: {
+            sk_debug_log_info("SteamUser", "Received session token");
+            size_t data_len = 0;
+            const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+            CMsgClientSessionToken* sess_token = cmsg_client_session_token__unpack(NULL, data_len, data);
+            if (sess_token) {
+                sk_session_token_callback_t* cb = sk_session_token_callback_create(sess_token->token);
+                if (cb && user->base.client) {
+                    sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_SESSION_TOKEN, 0, cb);
+                }
+                cmsg_client_session_token__free_unpacked(sess_token, NULL);
+            }
+            break;
+        }
+        case SK_EMSG_CLIENT_ACCOUNT_INFO: {
+            sk_debug_log_info("SteamUser", "Received account info");
+            size_t data_len = 0;
+            const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+            CMsgClientAccountInfo* acc_info = cmsg_client_account_info__unpack(NULL, data_len, data);
+            if (acc_info) {
+                sk_account_info_callback_t* cb = sk_account_info_callback_create(
+                    acc_info->persona_name,
+                    acc_info->ip_country,
+                    acc_info->count_authed_computers,
+                    acc_info->account_flags
+                );
+                if (cb && user->base.client) {
+                    sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_ACCOUNT_INFO, 0, cb);
+                }
+                cmsg_client_account_info__free_unpacked(acc_info, NULL);
+            }
+            break;
+        }
         default:
             break;
     }
 }
 
-typedef struct sk_steam_user {
-    struct sk_client_msg_handler base;
-    sk_log_on_details_t* logon_details;
-} sk_steam_user_t;
-
 sk_steam_user_t* sk_steam_user_create(void) {
     sk_steam_user_t* user = (sk_steam_user_t*)calloc(1, sizeof(sk_steam_user_t));
     if (user) {
         user->base.handle_msg = sk_steam_user_handle_msg;
+        user->base.handler_type = SK_HANDLER_STEAM_USER;
     }
     return user;
+}
+
+sk_log_on_details_t* sk_log_on_details_create(void) {
+    return (sk_log_on_details_t*)calloc(1, sizeof(sk_log_on_details_t));
+}
+
+void sk_log_on_details_destroy(sk_log_on_details_t* details) {
+    if (!details) return;
+    free(details->username);
+    free(details->password);
+    free(details->auth_code);
+    free(details->two_factor_code);
+    free(details->access_token);
+    free(details->machine_name);
+    free(details);
 }
 
 void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* details) {

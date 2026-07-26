@@ -44,6 +44,9 @@ uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
 // Check if OpenSSL is available
 bool sk_crypto_is_available(void);
 
+// AES/CBC decrypt a null-terminated encrypted string (base64-like) into a newly allocated string
+char* sk_crypto_aes_cbc_decrypt_string(const uint8_t* key, const char* encrypted);
+
 #ifdef __cplusplus
 }
 #endif

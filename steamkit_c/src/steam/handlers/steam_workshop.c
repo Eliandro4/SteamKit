@@ -15,6 +15,7 @@ sk_steam_workshop_t* sk_steam_workshop_create(void) {
     sk_steam_workshop_t* workshop = (sk_steam_workshop_t*)calloc(1, sizeof(sk_steam_workshop_t));
     if (workshop) {
         workshop->base.handle_msg = sk_steam_workshop_handle_msg;
+        workshop->base.handler_type = SK_HANDLER_STEAM_WORKSHOP;
     }
     return workshop;
 }

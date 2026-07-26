@@ -15,6 +15,7 @@ sk_steam_screenshots_t* sk_steam_screenshots_create(void) {
     sk_steam_screenshots_t* screenshots = (sk_steam_screenshots_t*)calloc(1, sizeof(sk_steam_screenshots_t));
     if (screenshots) {
         screenshots->base.handle_msg = sk_steam_ss_handle_msg;
+        screenshots->base.handler_type = SK_HANDLER_STEAM_SCREENSHOTS;
     }
     return screenshots;
 }

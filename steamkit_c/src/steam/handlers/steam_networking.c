@@ -15,6 +15,7 @@ sk_steam_networking_t* sk_steam_networking_create(void) {
     sk_steam_networking_t* networking = (sk_steam_networking_t*)calloc(1, sizeof(sk_steam_networking_t));
     if (networking) {
         networking->base.handle_msg = sk_steam_net_handle_msg;
+        networking->base.handler_type = SK_HANDLER_STEAM_NETWORKING;
     }
     return networking;
 }

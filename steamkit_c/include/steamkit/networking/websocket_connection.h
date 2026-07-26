@@ -23,6 +23,13 @@ sk_websocket_connection_t* sk_websocket_connection_create(const sk_websocket_con
 // Destroys a WebSocket connection
 void sk_websocket_connection_destroy(sk_websocket_connection_t* ws);
 
+// Connects to a WebSocket server. Returns true on success.
+// When SK_ENABLE_CURL is not defined, always returns false.
+bool sk_websocket_connection_connect(sk_websocket_connection_t* ws, const char* url, int timeout_ms);
+
+// Disconnects from the WebSocket server
+void sk_websocket_connection_disconnect(sk_websocket_connection_t* ws, bool user_initiated);
+
 #ifdef __cplusplus
 }
 #endif

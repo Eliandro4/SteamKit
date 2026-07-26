@@ -15,6 +15,7 @@ sk_steam_game_server_t* sk_steam_game_server_create(void) {
     sk_steam_game_server_t* server = (sk_steam_game_server_t*)calloc(1, sizeof(sk_steam_game_server_t));
     if (server) {
         server->base.handle_msg = sk_steam_gs_handle_msg;
+        server->base.handler_type = SK_HANDLER_STEAM_GAME_SERVER;
     }
     return server;
 }

@@ -41,6 +41,7 @@ sk_steam_user_stats_t* sk_steam_user_stats_create(void) {
     sk_steam_user_stats_t* stats = (sk_steam_user_stats_t*)calloc(1, sizeof(sk_steam_user_stats_t));
     if (stats) {
         stats->base.handle_msg = sk_steam_stats_handle_msg;
+        stats->base.handler_type = SK_HANDLER_STEAM_USER_STATS;
     }
     return stats;
 }

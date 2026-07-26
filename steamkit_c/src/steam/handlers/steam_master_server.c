@@ -15,6 +15,7 @@ sk_steam_master_server_t* sk_steam_master_server_create(void) {
     sk_steam_master_server_t* ms = (sk_steam_master_server_t*)calloc(1, sizeof(sk_steam_master_server_t));
     if (ms) {
         ms->base.handle_msg = sk_steam_ms_handle_msg;
+        ms->base.handler_type = SK_HANDLER_STEAM_MASTER_SERVER;
     }
     return ms;
 }
