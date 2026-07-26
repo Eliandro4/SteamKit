@@ -37,9 +37,13 @@ uint8_t* sk_crypto_sha1(const uint8_t* data, size_t data_len, size_t* out_len);
 uint8_t* sk_crypto_md5(const uint8_t* data, size_t data_len, size_t* out_len);
 
 // RSA encryption
+// public_key should be a null-terminated string in format "modulus_hex|exponent_hex"
 uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
-                                const uint8_t* public_key, size_t key_len,
-                                size_t* out_len);
+                               const uint8_t* public_key, size_t key_len,
+                               size_t* out_len);
+
+// Base64 encode
+char* sk_crypto_base64_encode(const uint8_t* input, size_t input_len);
 
 // Check if OpenSSL is available
 bool sk_crypto_is_available(void);

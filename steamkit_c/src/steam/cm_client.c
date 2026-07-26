@@ -5,6 +5,7 @@
 #include "steamkit/steam/handlers/client_msg_handler.h"
 #include "steamkit/steam/steam_client/configuration/steam_configuration.h"
 #include "steamkit/utils/debug_log.h"
+#include "steamkit/utils/lancache.h"
 #include "steamkit/networking/tcp_connection.h"
 #include "steamkit/networking/websocket_connection.h"
 #include <stdlib.h>
@@ -17,19 +18,10 @@
 #define SK_DEFAULT_CM_TCP_HOST "ext1-sea1.steamserver.net"
 #define SK_DEFAULT_CM_TCP_PORT 27017
 
-typedef enum {
-    SK_CM_SERVER_TYPE_WEBSOCKET,
-    SK_CM_SERVER_TYPE_TCP,
-} sk_cm_server_type_t;
+#define SK_CM_MAX_SERVERS 8
 
 typedef struct {
-    const char* host;
-    uint16_t port;
-    sk_cm_server_type_t type;
-} sk_cm_server_t;
-
-typedef struct {
-    sk_cm_server_t servers[4];
+    sk_cm_server_t servers[SK_CM_MAX_SERVERS];
     size_t count;
 } sk_cm_server_list_t;
 
@@ -52,7 +44,8 @@ struct sk_cm_client {
     sk_cm_client_callback_fn callback_fn;
     void* callback_user_data;
     sk_steam_client_t* steam_client;
-    const sk_cm_server_list_t* server_list;
+    sk_cm_server_list_t server_list;
+    bool use_dynamic_discovery;
 };
 
 static void sk_cm_client_net_msg_cb(void* user_data, const uint8_t* data, size_t len, sk_emsg_t msg) {
@@ -83,7 +76,7 @@ sk_cm_client_t* sk_cm_client_create(sk_steam_configuration_t* config, const char
     size_t len = strlen(identifier) + 1;
     client->identifier = (char*)malloc(len);
     if (client->identifier) memcpy(client->identifier, identifier, len);
-    client->server_list = &sk_default_server_list;
+    memcpy(&client->server_list, &sk_default_server_list, sizeof(sk_default_server_list));
     return client;
 }
 
@@ -99,6 +92,15 @@ bool sk_cm_client_is_connected(const sk_cm_client_t* client) {
     return client ? client->connected : false;
 }
 
+static bool sk_cm_server_is_lancache(const char* host, uint16_t port) {
+    if (!host) return false;
+#ifdef SK_ENABLE_CURL
+    return sk_lancache_detect(host, port);
+#else
+    return false;
+#endif
+}
+
 void sk_cm_client_connect(sk_cm_client_t* client) {
     if (!client || client->connected) return;
 
@@ -107,13 +109,18 @@ void sk_cm_client_connect(sk_cm_client_t* client) {
         timeout_ms = sk_steam_configuration_connection_timeout_ms(client->config);
     }
 
-    const sk_cm_server_list_t* server_list = client->server_list;
-    if (!server_list || server_list->count == 0) {
+    const sk_cm_server_list_t* server_list = &client->server_list;
+    if (server_list->count == 0) {
         server_list = &sk_default_server_list;
     }
 
     for (size_t i = 0; i < server_list->count; i++) {
         const sk_cm_server_t* server = &server_list->servers[i];
+
+        if (sk_cm_server_is_lancache(server->host, server->port)) {
+            sk_debug_log_info("CMClient", "Skipping Lancache server %s:%u", server->host, server->port);
+            continue;
+        }
 
         if (server->type == SK_CM_SERVER_TYPE_WEBSOCKET) {
 #ifdef SK_ENABLE_CURL
@@ -210,8 +217,8 @@ void sk_cm_client_set_callback(sk_cm_client_t* client, sk_cm_client_callback_fn 
 }
 
 void sk_cm_client_post_callback(sk_cm_client_t* client, void* callback_msg) {
-    if (!client || !client->callback_fn) return;
-    client->callback_fn(client->callback_user_data);
+    if (!client || !client->callback_fn || !callback_msg) return;
+    client->callback_fn(callback_msg);
 }
 
 void sk_cm_client_set_steam_client(sk_cm_client_t* client, sk_steam_client_t* steam_client) {
@@ -234,6 +241,12 @@ void sk_cm_client_on_connected(sk_cm_client_t* client) {
             sk_callback_msg_destroy((sk_callback_msg_t*)cb);
         }
     }
+    if (client->steam_client) {
+        sk_connected_callback_t* cb = sk_connected_callback_create();
+        if (cb) {
+            sk_steam_client_post_callback(client->steam_client, SK_CLIENT_CALLBACK_CONNECTED, 0, cb);
+        }
+    }
 }
 
 void sk_cm_client_on_disconnected(sk_cm_client_t* client, bool user_initiated) {
@@ -246,6 +259,25 @@ void sk_cm_client_on_disconnected(sk_cm_client_t* client, bool user_initiated) {
             sk_callback_msg_destroy((sk_callback_msg_t*)cb);
         }
     }
+    if (client->steam_client) {
+        sk_disconnected_callback_t* cb = sk_disconnected_callback_create(user_initiated);
+        if (cb) {
+            sk_steam_client_post_callback(client->steam_client, SK_CLIENT_CALLBACK_DISCONNECTED, 0, cb);
+        }
+    }
+}
+
+void sk_cm_client_set_server_list(sk_cm_client_t* client, const sk_cm_server_t* servers, size_t count) {
+    if (!client || !servers || count == 0 || count > 8) return;
+    memcpy(&client->server_list.servers, servers, count * sizeof(sk_cm_server_t));
+    client->server_list.count = count;
+    client->use_dynamic_discovery = false;
+}
+
+const sk_cm_server_t* sk_cm_client_get_server_list(const sk_cm_client_t* client, size_t* out_count) {
+    if (!client) return NULL;
+    if (out_count) *out_count = client->server_list.count;
+    return client->server_list.servers;
 }
 
 void sk_cm_client_on_packet_received(sk_cm_client_t* client, const sk_packet_msg_t* packet_msg) {

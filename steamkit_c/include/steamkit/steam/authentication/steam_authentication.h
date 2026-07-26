@@ -26,7 +26,7 @@ typedef struct sk_auth_session_details {
     bool is_remember_password;
     char* access_token;
     char* refresh_token;
-    
+
     char* device_friendly_name;
     bool is_persistent_session;
     sk_authenticator_t authenticator;
@@ -40,9 +40,29 @@ typedef struct sk_auth_poll_result {
     char* new_guard_data;
 } sk_auth_poll_result_t;
 
-// Session types
-typedef struct sk_qr_auth_session sk_qr_auth_session_t;
-typedef struct sk_credentials_auth_session sk_credentials_auth_session_t;
+// QR auth session
+typedef struct sk_qr_auth_session {
+    sk_steam_client_t* client;
+    uint64_t client_id;
+    uint8_t request_id[20];
+    size_t request_id_len;
+    int polling_interval_ms;
+    char* challenge_url;
+    sk_auth_session_details_t* details;
+    void (*challenge_url_changed)(const char* new_url, void* user_data);
+    void* challenge_url_changed_user_data;
+} sk_qr_auth_session_t;
+
+// Credentials auth session
+typedef struct sk_credentials_auth_session {
+    sk_steam_client_t* client;
+    uint64_t client_id;
+    uint8_t request_id[20];
+    size_t request_id_len;
+    int polling_interval_ms;
+    uint64_t steam_id;
+    sk_auth_session_details_t* details;
+} sk_credentials_auth_session_t;
 
 // Authentication handler
 typedef struct sk_steam_authentication sk_steam_authentication_t;
@@ -57,6 +77,9 @@ void sk_steam_authentication_destroy(sk_steam_authentication_t* auth);
 
 // QR Authentication
 sk_qr_auth_session_t* sk_auth_begin_session_via_qr(sk_steam_authentication_t* auth, const sk_auth_session_details_t* details);
+const char* sk_qr_auth_session_challenge_url(const sk_qr_auth_session_t* session);
+void sk_qr_auth_session_set_challenge_url_changed(sk_qr_auth_session_t* session,
+    void (*cb)(const char* new_url, void* user_data), void* user_data);
 sk_auth_poll_result_t* sk_qr_auth_session_poll_wait_for_result(sk_qr_auth_session_t* session);
 void sk_qr_auth_session_destroy(sk_qr_auth_session_t* session);
 
@@ -74,6 +97,20 @@ uint8_t* sk_auth_poll_auth_session_status(sk_steam_client_t* client,
 
 // Result lifecycle
 void sk_auth_poll_result_destroy(sk_auth_poll_result_t* result);
+
+// Result field accessors
+static inline const char* sk_auth_poll_result_account_name(const sk_auth_poll_result_t* result) {
+    return result ? result->account_name : NULL;
+}
+static inline const char* sk_auth_poll_result_refresh_token(const sk_auth_poll_result_t* result) {
+    return result ? result->refresh_token : NULL;
+}
+static inline const char* sk_auth_poll_result_access_token(const sk_auth_poll_result_t* result) {
+    return result ? result->access_token : NULL;
+}
+static inline const char* sk_auth_poll_result_new_guard_data(const sk_auth_poll_result_t* result) {
+    return result ? result->new_guard_data : NULL;
+}
 
 #ifdef __cplusplus
 }

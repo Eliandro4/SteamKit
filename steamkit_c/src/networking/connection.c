@@ -55,3 +55,9 @@ void* sk_connection_get_user_data(const sk_connection_t* conn) {
 void sk_connection_destroy(sk_connection_t* conn) {
     free(conn);
 }
+
+ssize_t sk_connection_recv(sk_connection_t* conn, uint8_t* buf, size_t buf_len, int timeout_ms) {
+    if (!conn || !conn->vtable) return -1;
+    typedef ssize_t (*recv_fn)(sk_connection_t*, uint8_t*, size_t, int);
+    return ((recv_fn)conn->vtable)(conn, buf, buf_len, timeout_ms);
+}

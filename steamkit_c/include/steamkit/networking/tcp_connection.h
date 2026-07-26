@@ -1,6 +1,7 @@
 #ifndef STEAMKIT_NETWORKING_TCP_CONNECTION_H
 #define STEAMKIT_NETWORKING_TCP_CONNECTION_H
 
+#include <sys/types.h>
 #include "steamkit/networking/connection.h"
 
 #ifdef __cplusplus
@@ -24,6 +25,9 @@ void sk_tcp_connection_disconnect(sk_tcp_connection_t* tcp, bool user_initiated)
 
 // Sends data to the remote host
 void sk_tcp_connection_send(sk_tcp_connection_t* tcp, const uint8_t* data, size_t len);
+
+// Receives data from the remote host
+ssize_t sk_tcp_connection_recv(sk_tcp_connection_t* tcp, uint8_t* buf, size_t buf_len, int timeout_ms);
 
 #ifdef __cplusplus
 }

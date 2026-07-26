@@ -66,8 +66,10 @@ static void sk_content_wait(sk_content_req_ctx_t* ctx) {
 }
 
 static void sk_content_server_response_cb(void* user_data, const uint8_t* body, size_t body_len, uint32_t eresult) {
-    (void)eresult;
     sk_content_req_ctx_t* ctx = (sk_content_req_ctx_t*)user_data;
+    if (eresult != 0) {
+        sk_debug_log_warn("SteamContent", "GetServersForSteamPipe returned eresult=%u", eresult);
+    }
     if (body && body_len > 0) {
         CContentServerDirectoryGetServersForSteamPipeResponse* resp = ccontent_server_directory__get_servers_for_steam_pipe__response__unpack(NULL, body_len, body);
         if (resp && resp->servers) {
@@ -113,8 +115,10 @@ static void sk_content_server_response_cb(void* user_data, const uint8_t* body, 
 }
 
 static void sk_content_manifest_response_cb(void* user_data, const uint8_t* body, size_t body_len, uint32_t eresult) {
-    (void)eresult;
     sk_content_req_ctx_t* ctx = (sk_content_req_ctx_t*)user_data;
+    if (eresult != 0) {
+        sk_debug_log_warn("SteamContent", "GetManifestRequestCode returned eresult=%u", eresult);
+    }
     if (body && body_len > 0) {
         CContentServerDirectoryGetManifestRequestCodeResponse* resp = ccontent_server_directory__get_manifest_request_code__response__unpack(NULL, body_len, body);
         if (resp) {
@@ -129,8 +133,10 @@ static void sk_content_manifest_response_cb(void* user_data, const uint8_t* body
 }
 
 static void sk_content_auth_response_cb(void* user_data, const uint8_t* body, size_t body_len, uint32_t eresult) {
-    (void)eresult;
     sk_content_req_ctx_t* ctx = (sk_content_req_ctx_t*)user_data;
+    if (eresult != 0) {
+        sk_debug_log_warn("SteamContent", "GetCDNAuthToken returned eresult=%u", eresult);
+    }
     if (body && body_len > 0) {
         CContentServerDirectoryGetCDNAuthTokenResponse* resp = ccontent_server_directory__get_cdnauth_token__response__unpack(NULL, body_len, body);
         if (resp) {

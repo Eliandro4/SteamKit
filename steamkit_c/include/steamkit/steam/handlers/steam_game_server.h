@@ -13,6 +13,7 @@ typedef struct sk_steam_game_server sk_steam_game_server_t;
 
 sk_steam_game_server_t* sk_steam_game_server_create(void);
 void sk_steam_game_server_destroy(sk_steam_game_server_t* server);
+void sk_steam_game_server_begin_session(sk_steam_game_server_t* server, uint32_t app_id);
 
 #ifdef __cplusplus
 }

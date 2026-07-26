@@ -260,3 +260,20 @@ send_error:
         tcp->base.disconnected_callback(tcp->base.user_data, true);
     }
 }
+
+ssize_t sk_tcp_connection_recv(sk_tcp_connection_t* tcp, uint8_t* buf, size_t buf_len, int timeout_ms) {
+    if (!tcp || !buf || buf_len == 0 || tcp->sockfd < 0) return -1;
+
+    if (timeout_ms > 0) {
+        fd_set fds;
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        FD_ZERO(&fds);
+        FD_SET(tcp->sockfd, &fds);
+        int rc = select(tcp->sockfd + 1, &fds, NULL, NULL, &tv);
+        if (rc <= 0) return -1;
+    }
+
+    return recv(tcp->sockfd, buf, buf_len, 0);
+}

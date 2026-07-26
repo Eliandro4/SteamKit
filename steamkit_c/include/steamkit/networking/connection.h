@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
 #include "steamkit/base/emsg.h"
 #include "steamkit/base/packet_base.h"
 
@@ -37,10 +38,12 @@ bool sk_connection_is_connected(const sk_connection_t* conn);
 void sk_connection_set_user_data(sk_connection_t* conn, void* user_data);
 void* sk_connection_get_user_data(const sk_connection_t* conn);
 void sk_connection_set_callbacks(sk_connection_t* conn, 
-                                 sk_connection_net_msg_fn net_msg_fn,
-                                 sk_connection_connected_fn connected_fn,
-                                 sk_connection_disconnected_fn disconnected_fn);
+                                  sk_connection_net_msg_fn net_msg_fn,
+                                  sk_connection_connected_fn connected_fn,
+                                  sk_connection_disconnected_fn disconnected_fn);
 void sk_connection_set_user_data(sk_connection_t* conn, void* user_data);
+void* sk_connection_get_user_data(const sk_connection_t* conn);
+ssize_t sk_connection_recv(sk_connection_t* conn, uint8_t* buf, size_t buf_len, int timeout_ms);
 void sk_connection_destroy(sk_connection_t* conn);
 
 #ifdef __cplusplus

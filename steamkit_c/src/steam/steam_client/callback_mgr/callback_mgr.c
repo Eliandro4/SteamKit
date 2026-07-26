@@ -1,5 +1,6 @@
 #include "steamkit/steam/steam_client/callback_mgr/callback_mgr.h"
 #include "steamkit/steam/steam_client.h"
+#include "steamkit/steam/callbacks.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,4 +62,8 @@ void sk_callback_mgr_post_callback(sk_callback_mgr_t* mgr, void* callback, size_
         mgr->queue = entry;
     }
     mgr->queue_tail = entry;
+
+    if (mgr->client) {
+        sk_steam_client_post_callback(mgr->client, (uint32_t)callback_id, 0, callback);
+    }
 }

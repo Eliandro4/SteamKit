@@ -13,6 +13,7 @@ typedef struct sk_steam_screenshots sk_steam_screenshots_t;
 
 sk_steam_screenshots_t* sk_steam_screenshots_create(void);
 void sk_steam_screenshots_destroy(sk_steam_screenshots_t* screenshots);
+void sk_steam_screenshots_take_screenshot(sk_steam_screenshots_t* screenshots);
 
 #ifdef __cplusplus
 }

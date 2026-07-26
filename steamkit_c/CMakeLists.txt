@@ -7,10 +7,12 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 enable_testing()
 
-# Option to enable optional dependencies
-option(SK_ENABLE_OPENSSL "Enable OpenSSL support for crypto" OFF)
-option(SK_ENABLE_CURL "Enable libcurl for HTTP/WebSocket" OFF)
-option(SK_ENABLE_ZLIB "Enable zlib for compression" OFF)
+# Required dependencies
+find_package(OpenSSL REQUIRED)
+find_package(CURL REQUIRED)
+find_package(ZLIB REQUIRED)
+
+# Optional dependencies
 option(SK_ENABLE_LZMA "Enable LZMA support" OFF)
 option(SK_ENABLE_ZSTD "Enable Zstandard support" OFF)
 option(SK_BUILD_SAMPLES "Build samples" OFF)
@@ -25,6 +27,7 @@ set(SK_SOURCES
     src/types/key_value.c
     src/types/msg_object.c
     src/types/depot_manifest.c
+    src/types/workshop_file_type.c
     src/base/emsg.c
     src/base/msg_hdr.c
     src/base/packet_base.c
@@ -59,6 +62,8 @@ set(SK_SOURCES
     src/utils/net_helpers.c
     src/utils/msg_util.c
     src/utils/http_client.c
+    src/utils/adler32.c
+    src/utils/lancache.c
     src/steam/steam_client/configuration/steam_configuration.c
     src/steam/steam_client/callback_mgr/callback_mgr.c
     src/steam/authentication/steam_authentication.c
@@ -84,26 +89,8 @@ set_target_properties(steamkit_c PROPERTIES
     SOVERSION 3
 )
 
-# Optional: OpenSSL
-if(SK_ENABLE_OPENSSL)
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(steamkit_c PUBLIC OpenSSL::SSL OpenSSL::Crypto)
-    target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_OPENSSL=1)
-endif()
-
-# Optional: libcurl
-if(SK_ENABLE_CURL)
-    find_package(CURL REQUIRED)
-    target_link_libraries(steamkit_c PUBLIC CURL::libcurl)
-    target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_CURL=1)
-endif()
-
-# Optional: zlib
-if(SK_ENABLE_ZLIB)
-    find_package(ZLIB REQUIRED)
-    target_link_libraries(steamkit_c PUBLIC ZLIB::ZLIB)
-    target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_ZLIB=1)
-endif()
+target_link_libraries(steamkit_c PUBLIC OpenSSL::SSL OpenSSL::Crypto CURL::libcurl ZLIB::ZLIB)
+target_compile_definitions(steamkit_c PUBLIC SK_ENABLE_OPENSSL=1 SK_ENABLE_CURL=1 SK_ENABLE_ZLIB=1)
 
 # Require protobuf-c for real networking
 find_package(PkgConfig REQUIRED)

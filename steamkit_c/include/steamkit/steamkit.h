@@ -16,6 +16,42 @@ extern "C" {
 #include "steamkit/types/global_id.h"
 #include "steamkit/types/key_value.h"
 #include "steamkit/types/msg_object.h"
+#include "steamkit/types/workshop_file_type.h"
+
+// PICS request type
+#include "steamkit/steam/handlers/steam_apps.h"
+
+// DepotDownloader types
+typedef struct sk_download_config {
+    int cell_id;
+    bool download_all_platforms;
+    bool prefer_beta_versions;
+    bool download_manifest_only;
+    char* install_directory;
+    bool using_file_list;
+    char** files_to_download;
+    uint32_t num_files_to_download;
+    bool using_exclusion_list;
+    char* beta_password;
+    uint32_t max_downloads;
+    bool qr_login;
+} sk_download_config_t;
+
+typedef struct sk_account_settings_store {
+    char* username;
+    char* access_token;
+    char* refresh_token;
+    char* steam_id;
+    bool remember_password;
+} sk_account_settings_store_t;
+
+typedef struct sk_depot_config_store {
+    uint32_t app_id;
+    uint32_t depot_id;
+    uint64_t manifest_id;
+    char* branch;
+    bool installed;
+} sk_depot_config_store_t;
 
 // Base message system
 #include "steamkit/base/emsg.h"
@@ -26,6 +62,7 @@ extern "C" {
 // Networking
 #include "steamkit/networking/connection.h"
 #include "steamkit/networking/tcp_connection.h"
+#include "steamkit/networking/udp_connection.h"
 #include "steamkit/networking/websocket_connection.h"
 
 // Steam client
@@ -51,9 +88,15 @@ extern "C" {
 #include "steamkit/steam/handlers/steam_networking.h"
 #include "steamkit/steam/handlers/steam_content.h"
 #include "steamkit/steam/handlers/steam_auth_ticket.h"
+#include "steamkit/steam/handlers/steam_published_file.h"
+
+// Authentication
+#include "steamkit/steam/authentication/steam_authentication.h"
 
 // Utilities
 #include "steamkit/utils/crypto_helper.h"
+#include "steamkit/utils/adler32.h"
+#include "steamkit/utils/lancache.h"
 #include "steamkit/utils/debug_log.h"
 #include "steamkit/utils/net_helpers.h"
 #include "steamkit/utils/msg_util.h"

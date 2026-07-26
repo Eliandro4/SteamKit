@@ -81,6 +81,12 @@ size_t sk_key_value_deserialize(sk_key_value_t* kv, const uint8_t* buffer, size_
 bool sk_key_value_load_from_buffer(sk_key_value_t* kv, const uint8_t* buffer, size_t buffer_size, bool as_binary);
 size_t sk_key_value_save_to_buffer(const sk_key_value_t* kv, uint8_t* buffer, size_t buffer_size, bool as_binary);
 
+// VDF format parse/write
+char* sk_key_value_write_vdf(const sk_key_value_t* kv, size_t* out_len);
+sk_key_value_t* sk_key_value_parse_vdf(const char* text, size_t text_len);
+sk_key_value_t* sk_key_value_load_vdf_file(const char* path);
+bool sk_key_value_save_vdf_file(const sk_key_value_t* kv, const char* path);
+
 #ifdef __cplusplus
 }
 #endif

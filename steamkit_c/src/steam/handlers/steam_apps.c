@@ -236,6 +236,52 @@ static void sk_steam_apps_handle_msg(struct sk_client_msg_handler* handler, cons
                         cb->unknown_apps = (uint32_t*)malloc(cb->num_unknown_apps * sizeof(uint32_t));
                         if (cb->unknown_apps) memcpy(cb->unknown_apps, resp->unknown_appids, cb->num_unknown_apps * sizeof(uint32_t));
                     }
+                    if (resp->n_apps > 0 && resp->apps) {
+                        cb->num_app_info = (uint32_t)resp->n_apps;
+                        cb->app_info_kv = (sk_key_value_t**)calloc(resp->n_apps, sizeof(sk_key_value_t*));
+                        cb->app_info_ids = (uint32_t*)malloc(resp->n_apps * sizeof(uint32_t));
+                        if (cb->app_info_kv && cb->app_info_ids) {
+                            for (size_t i = 0; i < resp->n_apps; ++i) {
+                                cb->app_info_ids[i] = resp->apps[i]->appid;
+                                if (resp->apps[i]->buffer.len > 0) {
+                                    CMsgKeyValueSet* kv_set = cmsg_key_value_set__unpack(NULL, resp->apps[i]->buffer.len, resp->apps[i]->buffer.data);
+                                    if (kv_set && kv_set->n_pairs > 0) {
+                                        sk_key_value_t* root = sk_key_value_create("app_info");
+                                        for (size_t j = 0; j < kv_set->n_pairs; ++j) {
+                                            sk_key_value_t* child = sk_key_value_create(kv_set->pairs[j]->name ? kv_set->pairs[j]->name : "");
+                                            sk_key_value_set_string(child, kv_set->pairs[j]->value ? kv_set->pairs[j]->value : "");
+                                            sk_key_value_add_child(root, child);
+                                        }
+                                        cb->app_info_kv[i] = root;
+                                    }
+                                    if (kv_set) cmsg_key_value_set__free_unpacked(kv_set, NULL);
+                                }
+                            }
+                        }
+                    }
+                    if (resp->n_packages > 0 && resp->packages) {
+                        cb->num_package_info = (uint32_t)resp->n_packages;
+                        cb->package_info_kv = (sk_key_value_t**)calloc(resp->n_packages, sizeof(sk_key_value_t*));
+                        cb->package_info_ids = (uint32_t*)malloc(resp->n_packages * sizeof(uint32_t));
+                        if (cb->package_info_kv && cb->package_info_ids) {
+                            for (size_t i = 0; i < resp->n_packages; ++i) {
+                                cb->package_info_ids[i] = resp->packages[i]->packageid;
+                                if (resp->packages[i]->buffer.len > 0) {
+                                    CMsgKeyValueSet* kv_set = cmsg_key_value_set__unpack(NULL, resp->packages[i]->buffer.len, resp->packages[i]->buffer.data);
+                                    if (kv_set && kv_set->n_pairs > 0) {
+                                        sk_key_value_t* root = sk_key_value_create("package_info");
+                                        for (size_t j = 0; j < kv_set->n_pairs; ++j) {
+                                            sk_key_value_t* child = sk_key_value_create(kv_set->pairs[j]->name ? kv_set->pairs[j]->name : "");
+                                            sk_key_value_set_string(child, kv_set->pairs[j]->value ? kv_set->pairs[j]->value : "");
+                                            sk_key_value_add_child(root, child);
+                                        }
+                                        cb->package_info_kv[i] = root;
+                                    }
+                                    if (kv_set) cmsg_key_value_set__free_unpacked(kv_set, NULL);
+                                }
+                            }
+                        }
+                    }
                 }
                 if (apps->base.client) {
                     sk_steam_client_post_callback(apps->base.client, SK_CLIENT_CALLBACK_PICS_PRODUCT_INFO, job_id, cb);
@@ -343,6 +389,109 @@ void sk_steam_apps_request_package_info(sk_steam_apps_t* apps, uint32_t package_
         sk_packet_msg_destroy(pkt);
     }
     sk_client_msg_protobuf_destroy(msg);
+}
+
+void sk_steam_apps_request_pics_info(sk_steam_apps_t* apps, const sk_pics_request_t* requests, uint32_t num_requests) {
+    if (!apps || !apps->base.client || !requests || num_requests == 0) return;
+
+    sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_CLIENT_PICS_PRODUCT_INFO_REQUEST);
+    if (!msg) return;
+
+    CMsgClientPICSProductInfoRequest req = CMSG_CLIENT_PICSPRODUCT_INFO_REQUEST__INIT;
+    req.meta_data_only = false;
+    req.has_meta_data_only = true;
+
+    uint32_t num_apps = 0;
+    uint32_t num_packages = 0;
+    for (uint32_t i = 0; i < num_requests; ++i) {
+        if (requests[i].is_package) num_packages++;
+        else num_apps++;
+    }
+
+    CMsgClientPICSProductInfoRequest__AppInfo** app_infos = NULL;
+    CMsgClientPICSProductInfoRequest__PackageInfo** pkg_infos = NULL;
+
+    if (num_apps > 0) {
+        app_infos = (CMsgClientPICSProductInfoRequest__AppInfo**)calloc(num_apps, sizeof(CMsgClientPICSProductInfoRequest__AppInfo*));
+        if (!app_infos) {
+            sk_client_msg_protobuf_destroy(msg);
+            return;
+        }
+        for (uint32_t i = 0; i < num_apps; ++i) {
+            app_infos[i] = (CMsgClientPICSProductInfoRequest__AppInfo*)calloc(1, sizeof(CMsgClientPICSProductInfoRequest__AppInfo));
+        }
+    }
+    if (num_packages > 0) {
+        pkg_infos = (CMsgClientPICSProductInfoRequest__PackageInfo**)calloc(num_packages, sizeof(CMsgClientPICSProductInfoRequest__PackageInfo*));
+        if (!pkg_infos) {
+            free(app_infos);
+            for (uint32_t i = 0; i < num_apps; ++i) free(app_infos[i]);
+            sk_client_msg_protobuf_destroy(msg);
+            return;
+        }
+        for (uint32_t i = 0; i < num_packages; ++i) {
+            pkg_infos[i] = (CMsgClientPICSProductInfoRequest__PackageInfo*)calloc(1, sizeof(CMsgClientPICSProductInfoRequest__PackageInfo));
+        }
+    }
+
+    uint32_t app_idx = 0;
+    uint32_t pkg_idx = 0;
+    for (uint32_t i = 0; i < num_requests; ++i) {
+        if (requests[i].is_package) {
+            if (pkg_infos[pkg_idx]) {
+                pkg_infos[pkg_idx]->packageid = requests[i].id;
+                pkg_infos[pkg_idx]->has_packageid = true;
+                if (requests[i].access_token > 0) {
+                    pkg_infos[pkg_idx]->access_token = requests[i].access_token;
+                    pkg_infos[pkg_idx]->has_access_token = true;
+                }
+            }
+            pkg_idx++;
+        } else {
+            if (app_infos[app_idx]) {
+                app_infos[app_idx]->appid = requests[i].id;
+                app_infos[app_idx]->has_appid = true;
+                app_infos[app_idx]->only_public_obsolete = false;
+                app_infos[app_idx]->has_only_public_obsolete = true;
+                if (requests[i].access_token > 0) {
+                    app_infos[app_idx]->access_token = requests[i].access_token;
+                    app_infos[app_idx]->has_access_token = true;
+                }
+            }
+            app_idx++;
+        }
+    }
+
+    req.apps = app_infos;
+    req.n_apps = num_apps;
+    req.packages = pkg_infos;
+    req.n_packages = num_packages;
+
+    size_t packed_size = cmsg_client_picsproduct_info_request__get_packed_size(&req);
+    uint8_t* packed_buf = (uint8_t*)malloc(packed_size);
+    if (packed_buf) {
+        cmsg_client_picsproduct_info_request__pack(&req, packed_buf);
+        sk_client_msg_protobuf_set_body(msg, packed_buf, packed_size);
+        free(packed_buf);
+    }
+
+    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg_protobuf(msg);
+    if (pkt) {
+        sk_steam_client_send(apps->base.client, pkt);
+        sk_packet_msg_destroy(pkt);
+    }
+
+    if (app_infos) {
+        for (uint32_t i = 0; i < num_apps; ++i) free(app_infos[i]);
+        free(app_infos);
+    }
+    if (pkg_infos) {
+        for (uint32_t i = 0; i < num_packages; ++i) free(pkg_infos[i]);
+        free(pkg_infos);
+    }
+    sk_client_msg_protobuf_destroy(msg);
+
+    sk_debug_log_info("SteamApps", "Requested PICS info for %u apps and %u packages", num_apps, num_packages);
 }
 
 sk_app_ownership_ticket_callback_t* sk_steam_apps_get_app_ownership_ticket(sk_steam_apps_t* apps, uint32_t app_id) {

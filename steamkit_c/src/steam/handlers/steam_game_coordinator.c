@@ -2,6 +2,7 @@
 #include "steamkit/steam/handlers/client_msg_handler.h"
 #include "steamkit/steam/handlers/client_msg_protobuf.h"
 #include "steamkit/steam/steam_client.h"
+#include "steamkit/steam/callbacks.h"
 #include "steamkit/utils/debug_log.h"
 #include "steammessages_base.pb-c.h"
 #include <stdlib.h>
@@ -19,7 +20,22 @@ static void sk_steam_gc_handle_msg(struct sk_client_msg_handler* handler, const 
 
     if ((sk_emsg_t)msg_type == SK_EMSG_CLIENT_FROM_GC) {
         sk_debug_log_info("SteamGC", "Received message from Game Coordinator");
-        // TODO: parse CMsgGCClient and dispatch via callback
+        size_t data_len = 0;
+        const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
+        if (data && data_len >= 8) {
+            uint32_t gc_msg_type = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+            uint32_t app_id = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+            const uint8_t* payload = data + 8;
+            size_t payload_len = data_len > 8 ? data_len - 8 : 0;
+            sk_debug_log_info("SteamGC", "GC message app_id=%u type=%u len=%zu", app_id, gc_msg_type, payload_len);
+            if (handler->client) {
+                sk_gc_message_callback_t* cb = sk_gc_message_callback_create(app_id, gc_msg_type, payload, payload_len);
+                if (cb) {
+                    sk_steam_client_post_callback(handler->client, SK_CLIENT_CALLBACK_GC_MESSAGE, 0, cb);
+                    sk_gc_message_callback_destroy(cb);
+                }
+            }
+        }
     }
 }
 

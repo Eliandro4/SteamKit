@@ -26,6 +26,90 @@ struct sk_cdn_client {
     sk_steam_client_t* steam_client;
 };
 
+struct sk_cdn_client_pool {
+    sk_cdn_server_t** servers;
+    size_t count;
+    size_t capacity;
+    size_t next_index;
+};
+
+sk_cdn_client_pool_t* sk_cdn_client_pool_create(void) {
+    sk_cdn_client_pool_t* pool = (sk_cdn_client_pool_t*)calloc(1, sizeof(sk_cdn_client_pool_t));
+    if (pool) {
+        pool->capacity = 8;
+        pool->servers = (sk_cdn_server_t**)calloc(pool->capacity, sizeof(sk_cdn_server_t*));
+        if (!pool->servers) {
+            free(pool);
+            return NULL;
+        }
+    }
+    return pool;
+}
+
+void sk_cdn_client_pool_destroy(sk_cdn_client_pool_t* pool) {
+    if (!pool) return;
+    for (size_t i = 0; i < pool->count; ++i) {
+        sk_cdn_server_destroy(pool->servers[i]);
+    }
+    free(pool->servers);
+    free(pool);
+}
+
+void sk_cdn_client_pool_add_server(sk_cdn_client_pool_t* pool, const sk_cdn_server_t* server) {
+    if (!pool || !server) return;
+    if (pool->count >= pool->capacity) {
+        size_t new_cap = pool->capacity * 2;
+        sk_cdn_server_t** new_servers = (sk_cdn_server_t**)realloc(pool->servers, new_cap * sizeof(sk_cdn_server_t*));
+        if (!new_servers) return;
+        pool->servers = new_servers;
+        pool->capacity = new_cap;
+    }
+    pool->servers[pool->count++] = sk_cdn_server_clone(server);
+}
+
+const sk_cdn_server_t* sk_cdn_client_pool_select_server(sk_cdn_client_pool_t* pool, bool prefer_https) {
+    if (!pool || pool->count == 0) return NULL;
+
+    const sk_cdn_server_t* best = NULL;
+    size_t best_idx = 0;
+
+    if (prefer_https) {
+        for (size_t i = 0; i < pool->count; ++i) {
+            const sk_cdn_server_t* s = pool->servers[i];
+            if (s->https_support && strcmp(s->https_support, "mandatory") == 0) {
+                best = s;
+                best_idx = i;
+                break;
+            }
+            if (!best || s->load < best->load) {
+                best = s;
+                best_idx = i;
+            }
+        }
+    } else {
+        for (size_t i = 0; i < pool->count; ++i) {
+            const sk_cdn_server_t* s = pool->servers[i];
+            if (!best || s->load < best->load) {
+                best = s;
+                best_idx = i;
+            }
+        }
+    }
+
+    pool->next_index = (best_idx + 1) % pool->count;
+    return best;
+}
+
+size_t sk_cdn_client_pool_count(const sk_cdn_client_pool_t* pool) {
+    return pool ? pool->count : 0;
+}
+
+const sk_cdn_server_t** sk_cdn_client_pool_get_servers(const sk_cdn_client_pool_t* pool, size_t* out_count) {
+    if (!pool || !out_count) return NULL;
+    *out_count = pool->count;
+    return (const sk_cdn_server_t**)pool->servers;
+}
+
 sk_cdn_client_t* sk_cdn_client_create(sk_steam_client_t* steam_client) {
     sk_cdn_client_t* client = (sk_cdn_client_t*)calloc(1, sizeof(sk_cdn_client_t));
     if (client) {

@@ -13,6 +13,7 @@ typedef struct sk_steam_networking sk_steam_networking_t;
 
 sk_steam_networking_t* sk_steam_networking_create(void);
 void sk_steam_networking_destroy(sk_steam_networking_t* networking);
+void sk_steam_networking_send_net_message(sk_steam_networking_t* net, uint32_t msg_type, const uint8_t* data, size_t len);
 
 #ifdef __cplusplus
 }

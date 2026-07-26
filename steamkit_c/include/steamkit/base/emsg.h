@@ -66,6 +66,7 @@ typedef enum sk_emsg {
 
     // Logon (protobuf)
     SK_EMSG_CLIENT_LOG_ON                               = 5514,  // EMsg.ClientLogon
+    SK_EMSG_CLIENT_LOG_ON_GAME_SERVER                   = 5559,  // EMsg.ClientLogonGameServer
 
     // Friends groups
     SK_EMSG_CLIENT_FRIENDS_GROUPS_LIST                  = 5553,
@@ -82,18 +83,26 @@ typedef enum sk_emsg {
     SK_EMSG_CLIENT_GET_NUMBER_OF_CURRENT_PLAYERS_DP     = 5592,
     SK_EMSG_CLIENT_GET_NUMBER_OF_CURRENT_PLAYERS_DP_RESPONSE = 5593,
 
-    // PICS (modern app/package info)
-    SK_EMSG_CLIENT_PICS_CHANGES_SINCE_REQUEST           = 8901,
-    SK_EMSG_CLIENT_PICS_CHANGES_SINCE_RESPONSE          = 8902,
-    SK_EMSG_CLIENT_PICS_PRODUCT_INFO_REQUEST            = 8903,
-    SK_EMSG_CLIENT_PICS_PRODUCT_INFO_RESPONSE           = 8904,
-    SK_EMSG_CLIENT_PICS_ACCESS_TOKEN_REQUEST            = 8905,
-    SK_EMSG_CLIENT_PICS_ACCESS_TOKEN_RESPONSE           = 8906,
-    SK_EMSG_CLIENT_PICS_PRIVATE_BETA_REQUEST            = 8907,
-    SK_EMSG_CLIENT_PICS_PRIVATE_BETA_RESPONSE           = 8908,
+     // PICS (modern app/package info)
+     SK_EMSG_CLIENT_PICS_CHANGES_SINCE_REQUEST           = 8901,
+     SK_EMSG_CLIENT_PICS_CHANGES_SINCE_RESPONSE          = 8902,
+     SK_EMSG_CLIENT_PICS_PRODUCT_INFO_REQUEST            = 8903,
+     SK_EMSG_CLIENT_PICS_PRODUCT_INFO_RESPONSE           = 8904,
+     SK_EMSG_CLIENT_PICS_ACCESS_TOKEN_REQUEST            = 8905,
+     SK_EMSG_CLIENT_PICS_ACCESS_TOKEN_RESPONSE           = 8906,
+     SK_EMSG_CLIENT_PICS_PRIVATE_BETA_REQUEST            = 8907,
+     SK_EMSG_CLIENT_PICS_PRIVATE_BETA_RESPONSE           = 8908,
 
-    // Bit masks
-    SK_EMSG_PROTO_MASK                                  = 0x80000000,
+     // Matchmaking / lobby
+     SK_EMSG_CLIENT_MMS_GET_LOBBY_LIST                    = 6607,
+     SK_EMSG_CLIENT_MMS_GET_LOBBY_LIST_RESPONSE           = 6608,
+
+     // Screenshot / UCM
+     SK_EMSG_CLIENT_UCM_ADD_SCREENSHOT                    = 7301,
+     SK_EMSG_CLIENT_UCM_ADD_SCREENSHOT_RESPONSE           = 7302,
+
+     // Bit masks
+     SK_EMSG_PROTO_MASK                                  = 0x80000000,
 } sk_emsg_t;
 
 static inline bool sk_emsg_is_proto(sk_emsg_t msg) {
@@ -105,15 +114,18 @@ static inline bool sk_emsg_is_client_to_gc(sk_emsg_t msg) {
 }
 
 static inline bool sk_emsg_is_client_to_server(sk_emsg_t msg) {
-    // Covers login, friends, content, PICS ranges
     return (msg >= 700 && msg <= 899) ||
            (msg >= 5400 && msg <= 5599) ||
+           (msg >= 6600 && msg <= 6631) ||
+           (msg >= 7300 && msg <= 7381) ||
            (msg >= 8900 && msg <= 8999);
 }
 
 static inline bool sk_emsg_is_server_to_client(sk_emsg_t msg) {
     return (msg >= 750 && msg <= 860) ||
            (msg >= 5439 && msg <= 5453) ||
+           (msg >= 6608 && msg <= 6627) ||
+           (msg >= 7302 && msg <= 7379) ||
            (msg >= 8902 && msg <= 8908);
 }
 

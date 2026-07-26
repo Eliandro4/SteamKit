@@ -18,7 +18,8 @@ typedef struct sk_depot_chunk {
 
 typedef enum {
     SK_DEPOT_FILE_FLAG_NONE = 0,
-    SK_DEPOT_FILE_FLAG_DIRECTORY = 1
+    SK_DEPOT_FILE_FLAG_DIRECTORY = 1,
+    SK_DEPOT_FILE_FLAG_EXECUTABLE = 2
 } sk_depot_file_flag_t;
 
 typedef struct sk_depot_file {

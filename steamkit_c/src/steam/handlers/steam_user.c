@@ -1,22 +1,24 @@
+#define _GNU_SOURCE
 #include "steamkit/steam/handlers/steam_user.h"
 #include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/steam/handlers/steam_unified_messages.h"
 #include "steamkit/steam/steam_client.h"
 #include "steamkit/steam/callbacks.h"
 #include "steamkit/utils/debug_log.h"
 #include "steamkit/utils/msg_util.h"
+#include "steamkit/utils/crypto_helper.h"
 #include "steamkit/base/generated/steam_msg_user.h"
 #include "steamkit/steam/handlers/client_msg_protobuf.h"
+#include "steamkit/steam/authentication/steam_authentication.h"
 #include "steammessages_clientserver_login.pb-c.h"
 #include "steammessages_clientserver.pb-c.h"
+#include "steammessages_auth.steamclient.pb-c.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-typedef struct sk_steam_user {
-    struct sk_client_msg_handler base;
-    sk_log_on_details_t* logon_details;
-} sk_steam_user_t;
+#include <pthread.h>
+#include <time.h>
 
 static char* sk_strdup(const char* s) {
     if (!s) return NULL;
@@ -25,6 +27,94 @@ static char* sk_strdup(const char* s) {
     if (dup) memcpy(dup, s, len);
     return dup;
 }
+
+static bool sk_logon_use_rsa_encryption(const sk_log_on_details_t* details) {
+    return details && details->password && details->password[0] && sk_crypto_is_available();
+}
+
+typedef struct {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    bool done;
+    char* public_key;
+} sk_rsa_req_ctx_t;
+
+static void sk_rsa_response_cb(void* user_data, const uint8_t* body, size_t body_len, uint32_t eresult) {
+    (void)eresult;
+    sk_rsa_req_ctx_t* ctx = (sk_rsa_req_ctx_t*)user_data;
+    if (body && body_len > 0) {
+        CAuthenticationGetPasswordRSAPublicKeyResponse* resp =
+            cauthentication__get_password_rsapublic_key__response__unpack(NULL, body_len, body);
+        if (resp) {
+            if (resp->publickey_mod && resp->publickey_exp) {
+                size_t len = strlen(resp->publickey_mod) + 1 + strlen(resp->publickey_exp) + 1;
+                ctx->public_key = (char*)malloc(len);
+                if (ctx->public_key) {
+                    snprintf(ctx->public_key, len, "%s|%s", resp->publickey_mod, resp->publickey_exp);
+                }
+            }
+            cauthentication__get_password_rsapublic_key__response__free_unpacked(resp, NULL);
+        }
+    }
+    pthread_mutex_lock(&ctx->mutex);
+    ctx->done = true;
+    pthread_cond_signal(&ctx->cond);
+    pthread_mutex_unlock(&ctx->mutex);
+}
+
+static char* sk_steam_user_fetch_rsa_key(sk_steam_client_t* client, const char* account_name) {
+    if (!client || !account_name) return NULL;
+
+    sk_steam_unified_messages_t* um = sk_steam_client_get_unified_messages(client);
+    if (!um) return NULL;
+
+    sk_unified_service_t* svc = sk_steam_unified_messages_create_service(um, "Authentication");
+    if (!svc) return NULL;
+
+    CAuthenticationGetPasswordRSAPublicKeyRequest req = CAUTHENTICATION__GET_PASSWORD_RSAPUBLIC_KEY__REQUEST__INIT;
+    req.account_name = (char*)account_name;
+
+    size_t packed_size = cauthentication__get_password_rsapublic_key__request__get_packed_size(&req);
+    uint8_t* packed_buf = (uint8_t*)malloc(packed_size);
+    if (!packed_buf) {
+        sk_steam_unified_messages_remove_service(um, "Authentication");
+        return NULL;
+    }
+    cauthentication__get_password_rsapublic_key__request__pack(&req, packed_buf);
+
+    sk_rsa_req_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    pthread_mutex_init(&ctx.mutex, NULL);
+    pthread_cond_init(&ctx.cond, NULL);
+
+    sk_steam_unified_messages_send_request(um, svc, "GetPasswordRSAPublicKey", packed_buf, packed_size, 0,
+        sk_rsa_response_cb, &ctx);
+
+    free(packed_buf);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 10;
+
+    pthread_mutex_lock(&ctx.mutex);
+    while (!ctx.done) {
+        if (pthread_cond_timedwait(&ctx.cond, &ctx.mutex, &ts) != 0) {
+            break;
+        }
+    }
+    pthread_mutex_unlock(&ctx.mutex);
+
+    pthread_mutex_destroy(&ctx.mutex);
+    pthread_cond_destroy(&ctx.cond);
+
+    sk_steam_unified_messages_remove_service(um, "Authentication");
+    return ctx.public_key;
+}
+
+typedef struct sk_steam_user {
+    struct sk_client_msg_handler base;
+    sk_log_on_details_t* logon_details;
+} sk_steam_user_t;
 
 static void sk_steam_user_handle_msg(struct sk_client_msg_handler* handler, const sk_packet_msg_t* packet_msg) {
     if (!handler || !packet_msg) return;
@@ -161,12 +251,31 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
         return;
     }
 
+    char* encrypted_password = NULL;
+    if (sk_logon_use_rsa_encryption(user->logon_details)) {
+        char* pub_key = sk_steam_user_fetch_rsa_key(user->base.client, user->logon_details->username);
+        if (pub_key) {
+            size_t enc_len = 0;
+            uint8_t* enc = sk_crypto_rsa_encrypt((const uint8_t*)user->logon_details->password,
+                strlen(user->logon_details->password), (const uint8_t*)pub_key, strlen(pub_key), &enc_len);
+            if (enc) {
+                encrypted_password = sk_crypto_base64_encode(enc, enc_len);
+                free(enc);
+                sk_debug_log_info("SteamUser", "Password encrypted with RSA public key");
+            }
+            free(pub_key);
+        }
+    }
+
     sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_CLIENT_LOG_ON);
-    if (!msg) return;
+    if (!msg) {
+        free(encrypted_password);
+        return;
+    }
 
     CMsgClientLogon logon_msg = CMSG_CLIENT_LOGON__INIT;
     logon_msg.account_name = user->logon_details->username;
-    logon_msg.password = user->logon_details->password;
+    logon_msg.password = encrypted_password ? encrypted_password : user->logon_details->password;
     
     if (user->logon_details->machine_name) {
         logon_msg.machine_name = user->logon_details->machine_name;
@@ -209,6 +318,7 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
     }
     
     sk_client_msg_protobuf_destroy(msg);
+    free(encrypted_password);
     sk_debug_log_info("SteamUser", "Logon message sent for user: %s", details->username ? details->username : "(null)");
 }
 

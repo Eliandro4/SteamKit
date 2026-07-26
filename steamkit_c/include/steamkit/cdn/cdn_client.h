@@ -5,12 +5,14 @@
 #include "steamkit/cdn/cdn_server.h"
 #include "steamkit/types/depot_manifest.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct sk_cdn_client sk_cdn_client_t;
+typedef struct sk_cdn_client_pool sk_cdn_client_pool_t;
 
 sk_cdn_client_t* sk_cdn_client_create(sk_steam_client_t* steam_client);
 void sk_cdn_client_destroy(sk_cdn_client_t* client);
@@ -35,6 +37,14 @@ int sk_cdn_client_download_depot_chunk(
     const uint8_t* depot_key,
     size_t key_len,
     const char* cdn_token);
+
+sk_cdn_client_pool_t* sk_cdn_client_pool_create(void);
+void sk_cdn_client_pool_destroy(sk_cdn_client_pool_t* pool);
+
+void sk_cdn_client_pool_add_server(sk_cdn_client_pool_t* pool, const sk_cdn_server_t* server);
+const sk_cdn_server_t* sk_cdn_client_pool_select_server(sk_cdn_client_pool_t* pool, bool prefer_https);
+size_t sk_cdn_client_pool_count(const sk_cdn_client_pool_t* pool);
+const sk_cdn_server_t** sk_cdn_client_pool_get_servers(const sk_cdn_client_pool_t* pool, size_t* out_count);
 
 #ifdef __cplusplus
 }

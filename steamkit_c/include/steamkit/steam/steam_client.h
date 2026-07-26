@@ -40,6 +40,8 @@ typedef enum sk_client_callback_type {
     SK_CLIENT_CALLBACK_UGC_DETAILS,
     SK_CLIENT_CALLBACK_PUBLISHED_FILE_DETAILS,
     SK_CLIENT_CALLBACK_SERVICE_METHOD_RESPONSE,
+    SK_CLIENT_CALLBACK_GC_MESSAGE,
+    SK_CLIENT_CALLBACK_LOBBY_MATCHMAKING,
 } sk_client_callback_type_t;
 
 // SteamClient - mirrors C# SteamClient (the main entry point)

@@ -234,17 +234,27 @@ void sk_pics_product_info_callback_destroy(sk_pics_product_info_callback_t* cb) 
     free(cb->unknown_packages);
     free(cb->unknown_apps);
     free(cb->app_info_ids);
-    free(cb->app_info_kv);
+    if (cb->app_info_kv) {
+        for (uint32_t i = 0; i < cb->num_app_info; ++i) {
+            sk_key_value_destroy(cb->app_info_kv[i]);
+        }
+        free(cb->app_info_kv);
+    }
     free(cb->package_info_ids);
-    free(cb->package_info_kv);
+    if (cb->package_info_kv) {
+        for (uint32_t i = 0; i < cb->num_package_info; ++i) {
+            sk_key_value_destroy(cb->package_info_kv[i]);
+        }
+        free(cb->package_info_kv);
+    }
     free(cb);
 }
 
-sk_private_beta_callback_t* sk_private_beta_callback_create(uint32_t result, const void* depot_section) {
+sk_private_beta_callback_t* sk_private_beta_callback_create(uint32_t result, const sk_key_value_t* depot_section) {
     sk_private_beta_callback_t* cb = (sk_private_beta_callback_t*)calloc(1, sizeof(*cb));
     if (cb) {
         cb->result = result;
-        cb->depot_section = (void*)depot_section;
+        cb->depot_section = depot_section;
     }
     return cb;
 }
@@ -321,5 +331,54 @@ void sk_ugc_details_callback_destroy(sk_ugc_details_callback_t* cb) {
     if (!cb) return;
     free(cb->file_name);
     free(cb->url);
+    free(cb);
+}
+
+sk_gc_message_callback_t* sk_gc_message_callback_create(uint32_t app_id, uint32_t msg_type, const uint8_t* payload, size_t payload_len) {
+    sk_gc_message_callback_t* cb = (sk_gc_message_callback_t*)calloc(1, sizeof(*cb));
+    if (cb) {
+        cb->app_id = app_id;
+        cb->msg_type = msg_type;
+        cb->payload_len = payload_len;
+        if (payload_len > 0 && payload) {
+            cb->payload = (uint8_t*)malloc(payload_len);
+            if (cb->payload) memcpy(cb->payload, payload, payload_len);
+        }
+    }
+    return cb;
+}
+
+void sk_gc_message_callback_destroy(sk_gc_message_callback_t* cb) {
+    if (!cb) return;
+    free(cb->payload);
+    free(cb);
+}
+
+sk_lobby_matchmaking_callback_t* sk_lobby_matchmaking_callback_create(uint32_t result, const uint64_t* lobby_steam_ids, uint32_t num_lobbies, const int32_t* lobby_types, const int32_t* distances) {
+    sk_lobby_matchmaking_callback_t* cb = (sk_lobby_matchmaking_callback_t*)calloc(1, sizeof(*cb));
+    if (cb) {
+        cb->result = result;
+        cb->num_lobbies = num_lobbies;
+        if (num_lobbies > 0 && lobby_steam_ids) {
+            cb->lobby_steam_ids = (uint64_t*)malloc(num_lobbies * sizeof(uint64_t));
+            if (cb->lobby_steam_ids) memcpy(cb->lobby_steam_ids, lobby_steam_ids, num_lobbies * sizeof(uint64_t));
+        }
+        if (lobby_types) {
+            cb->lobby_types = (int32_t*)malloc(num_lobbies * sizeof(int32_t));
+            if (cb->lobby_types) memcpy(cb->lobby_types, lobby_types, num_lobbies * sizeof(int32_t));
+        }
+        if (distances) {
+            cb->distances = (int32_t*)malloc(num_lobbies * sizeof(int32_t));
+            if (cb->distances) memcpy(cb->distances, distances, num_lobbies * sizeof(int32_t));
+        }
+    }
+    return cb;
+}
+
+void sk_lobby_matchmaking_callback_destroy(sk_lobby_matchmaking_callback_t* cb) {
+    if (!cb) return;
+    free(cb->lobby_steam_ids);
+    free(cb->lobby_types);
+    free(cb->distances);
     free(cb);
 }

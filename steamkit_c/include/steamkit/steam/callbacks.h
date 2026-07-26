@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include "steamkit/types/steam_id.h"
 #include "steamkit/types/job_id.h"
+#include "steamkit/types/key_value.h"
 #include "steamkit/cdn/cdn_server.h"
 
 #ifdef __cplusplus
@@ -19,6 +20,8 @@ typedef struct sk_steam_client sk_steam_client_t;
 typedef struct sk_callback_msg {
     sk_job_id_t job_id;
 } sk_callback_msg_t;
+
+// Callback lifecycle
 
 // Connected callback
 typedef struct sk_connected_callback {
@@ -143,10 +146,10 @@ typedef struct sk_pics_product_info_callback {
     uint32_t num_unknown_packages;
     uint32_t* unknown_apps;
     uint32_t num_unknown_apps;
-    void** app_info_kv;
+    sk_key_value_t** app_info_kv;
     uint32_t* app_info_ids;
     uint32_t num_app_info;
-    void** package_info_kv;
+    sk_key_value_t** package_info_kv;
     uint32_t* package_info_ids;
     uint32_t num_package_info;
 } sk_pics_product_info_callback_t;
@@ -154,7 +157,7 @@ typedef struct sk_pics_product_info_callback {
 typedef struct sk_private_beta_callback {
     sk_callback_msg_t base;
     uint32_t result;
-    void* depot_section;
+    sk_key_value_t* depot_section;
 } sk_private_beta_callback_t;
 
 // SteamContent callbacks
@@ -184,6 +187,15 @@ typedef struct sk_ugc_details_callback {
     char* url;
     uint64_t file_size;
 } sk_ugc_details_callback_t;
+
+// GC message callback
+typedef struct sk_gc_message_callback {
+    sk_callback_msg_t base;
+    uint32_t app_id;
+    uint32_t msg_type;
+    uint8_t* payload;
+    size_t payload_len;
+} sk_gc_message_callback_t;
 
 // Callback lifecycle
 sk_callback_msg_t* sk_callback_msg_create(void);
@@ -229,7 +241,7 @@ void sk_pics_changes_callback_destroy(sk_pics_changes_callback_t* cb);
 sk_pics_product_info_callback_t* sk_pics_product_info_callback_create(void);
 void sk_pics_product_info_callback_destroy(sk_pics_product_info_callback_t* cb);
 
-sk_private_beta_callback_t* sk_private_beta_callback_create(uint32_t result, const void* depot_section);
+sk_private_beta_callback_t* sk_private_beta_callback_create(uint32_t result, const sk_key_value_t* depot_section);
 void sk_private_beta_callback_destroy(sk_private_beta_callback_t* cb);
 
 // SteamContent callbacks
@@ -245,6 +257,23 @@ void sk_cdn_auth_token_callback_destroy(sk_cdn_auth_token_callback_t* cb);
 // SteamCloud callbacks
 sk_ugc_details_callback_t* sk_ugc_details_callback_create(uint64_t ugc_id, const char* file_name, const char* url, uint64_t file_size);
 void sk_ugc_details_callback_destroy(sk_ugc_details_callback_t* cb);
+
+// GameCoordinator callbacks
+sk_gc_message_callback_t* sk_gc_message_callback_create(uint32_t app_id, uint32_t msg_type, const uint8_t* payload, size_t payload_len);
+void sk_gc_message_callback_destroy(sk_gc_message_callback_t* cb);
+
+// SteamMatchmaking callbacks
+typedef struct sk_lobby_matchmaking_callback {
+    sk_callback_msg_t base;
+    uint32_t result;
+    uint64_t* lobby_steam_ids;
+    uint32_t num_lobbies;
+    int32_t* lobby_types;
+    int32_t* distances;
+} sk_lobby_matchmaking_callback_t;
+
+sk_lobby_matchmaking_callback_t* sk_lobby_matchmaking_callback_create(uint32_t result, const uint64_t* lobby_steam_ids, uint32_t num_lobbies, const int32_t* lobby_types, const int32_t* distances);
+void sk_lobby_matchmaking_callback_destroy(sk_lobby_matchmaking_callback_t* cb);
 
 #ifdef __cplusplus
 }

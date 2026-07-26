@@ -68,9 +68,6 @@ sk_steam_client_t* sk_steam_client_create_with_config(sk_steam_configuration_t* 
 void sk_steam_client_destroy(sk_steam_client_t* client) {
     if (!client) return;
     sk_cm_client_disconnect(client->base, true);
-    for (size_t i = 0; i < client->handler_count; ++i) {
-        free(client->handlers[i]);
-    }
     free(client->handlers);
     free(client->next_job_id);
 

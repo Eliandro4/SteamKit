@@ -202,18 +202,86 @@ uint8_t* sk_crypto_md5(const uint8_t* data, size_t data_len, size_t* out_len) {
 }
 
 uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
-                               const uint8_t* public_key, size_t key_len,
+                               const uint8_t* public_key_hex, size_t key_len,
                                size_t* out_len) {
-    (void)input;
-    (void)input_len;
-    (void)public_key;
-    (void)key_len;
-    if (out_len) *out_len = 0;
-    return NULL;
+    if (!input || input_len == 0 || !public_key_hex || key_len == 0) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    const char* mod_hex_str = (const char*)public_key_hex;
+    const char* exp_hex = strchr(mod_hex_str, '|');
+    if (!exp_hex) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    size_t mod_hex_len = (size_t)(exp_hex - mod_hex_str);
+    exp_hex++;
+
+    char* mod_hex = (char*)malloc(mod_hex_len + 1);
+    if (!mod_hex) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    memcpy(mod_hex, mod_hex_str, mod_hex_len);
+    mod_hex[mod_hex_len] = '\0';
+
+    BIGNUM* bn_mod = NULL;
+    BIGNUM* bn_exp = NULL;
+    if (BN_hex2bn(&bn_mod, mod_hex) == 0 || BN_hex2bn(&bn_exp, exp_hex) == 0) {
+        free(mod_hex);
+        BN_free(bn_mod);
+        BN_free(bn_exp);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    free(mod_hex);
+
+    RSA* rsa = RSA_new();
+    if (!rsa || !RSA_set0_key(rsa, bn_mod, bn_exp, NULL)) {
+        RSA_free(rsa);
+        BN_free(bn_mod);
+        BN_free(bn_exp);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    int key_size = RSA_size(rsa);
+    uint8_t* output = (uint8_t*)malloc((size_t)key_size);
+    if (!output) {
+        RSA_free(rsa);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    int result = RSA_public_encrypt((int)input_len, input, output, rsa, RSA_PKCS1_PADDING);
+    RSA_free(rsa);
+    if (result <= 0) {
+        free(output);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    if (out_len) *out_len = (size_t)result;
+    return output;
 }
 
 bool sk_crypto_is_available(void) {
     return true;
+}
+
+char* sk_crypto_base64_encode(const uint8_t* input, size_t input_len) {
+    if (!input || input_len == 0) return NULL;
+    size_t enc_len = 4 * ((input_len + 2) / 3);
+    char* output = (char*)malloc(enc_len + 1);
+    if (!output) return NULL;
+    int written = EVP_EncodeBlock((unsigned char*)output, input, (int)input_len);
+    if (written < 0 || (size_t)written != enc_len) {
+        free(output);
+        return NULL;
+    }
+    output[enc_len] = '\0';
+    return output;
 }
 
 char* sk_crypto_aes_cbc_decrypt_string(const uint8_t* key, const char* encrypted) {
@@ -307,6 +375,11 @@ uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
                                size_t* out_len) {
     (void)input; (void)input_len; (void)public_key; (void)key_len;
     if (out_len) *out_len = 0;
+    return NULL;
+}
+
+char* sk_crypto_base64_encode(const uint8_t* input, size_t input_len) {
+    (void)input; (void)input_len;
     return NULL;
 }
 

@@ -49,6 +49,10 @@ const char* sk_emsg_to_string(sk_emsg_t msg) {
         case SK_EMSG_CLIENT_PICS_ACCESS_TOKEN_RESPONSE:           return "ClientPICSAccessTokenResponse";
         case SK_EMSG_CLIENT_PICS_PRIVATE_BETA_REQUEST:            return "ClientPICSPrivateBetaRequest";
         case SK_EMSG_CLIENT_PICS_PRIVATE_BETA_RESPONSE:           return "ClientPICSPrivateBetaResponse";
+        case SK_EMSG_CLIENT_MMS_GET_LOBBY_LIST:                    return "ClientMMSGetLobbyList";
+        case SK_EMSG_CLIENT_MMS_GET_LOBBY_LIST_RESPONSE:           return "ClientMMSGetLobbyListResponse";
+        case SK_EMSG_CLIENT_UCM_ADD_SCREENSHOT:                    return "ClientUCMAddScreenshot";
+        case SK_EMSG_CLIENT_UCM_ADD_SCREENSHOT_RESPONSE:           return "ClientUCMAddScreenshotResponse";
         default:                                                  return "Unknown";
     }
 }
