@@ -30,6 +30,12 @@ bool sk_websocket_connection_connect(sk_websocket_connection_t* ws, const char* 
 // Disconnects from the WebSocket server
 void sk_websocket_connection_disconnect(sk_websocket_connection_t* ws, bool user_initiated);
 
+// Sends data over the WebSocket
+void sk_websocket_connection_send(sk_websocket_connection_t* ws, const uint8_t* data, size_t len);
+
+// Receives data from the WebSocket
+ssize_t sk_websocket_connection_recv(sk_websocket_connection_t* ws, uint8_t* buf, size_t buf_len, int timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

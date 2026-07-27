@@ -60,6 +60,9 @@ void sk_steam_client_destroy(sk_steam_client_t* client);
 // Connects to the Steam network
 void sk_steam_client_connect(sk_steam_client_t* client);
 
+// Sets the cell ID used for CM server discovery
+void sk_steam_client_set_cell_id(sk_steam_client_t* client, uint32_t cell_id);
+
 // Disconnects from the Steam network
 void sk_steam_client_disconnect(sk_steam_client_t* client, bool user_initiated);
 
@@ -68,6 +71,7 @@ sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client);
 
 // Checks if the client is connected
 bool sk_steam_client_is_connected(const sk_steam_client_t* client);
+bool sk_steam_client_is_channel_ready(const sk_steam_client_t* client);
 
 // Registers a handler
 void sk_steam_client_add_handler(struct sk_steam_client* client, struct sk_client_msg_handler* handler);

@@ -5,12 +5,14 @@
 #include <stdbool.h>
 
 #ifdef SK_ENABLE_OPENSSL
+#define OPENSSL_API_COMPAT 0x10100000L
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/aes.h>
 #include <openssl/rsa.h>
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
+#include <openssl/x509.h>
 
 static uint8_t* sk_crypto_aes_cbc_decrypt_internal(const uint8_t* input, size_t input_len,
                                                     const uint8_t* key, size_t key_len,
@@ -264,6 +266,74 @@ uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
 
     if (out_len) *out_len = (size_t)result;
     return output;
+}
+
+uint8_t* sk_crypto_rsa_encrypt_oaep_sha1(const uint8_t* input, size_t input_len,
+                                           const uint8_t* public_key_der, size_t key_len,
+                                           size_t* out_len) {
+    if (!input || input_len == 0 || !public_key_der || key_len < 22) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    RSA* rsa = NULL;
+    const unsigned char* p = (const unsigned char*)public_key_der;
+
+    X509_PUBKEY* pubkey = d2i_X509_PUBKEY(NULL, &p, (long)key_len);
+    if (!pubkey) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    EVP_PKEY* evp = X509_PUBKEY_get(pubkey);
+    X509_PUBKEY_free(pubkey);
+    if (!evp) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    rsa = EVP_PKEY_get1_RSA(evp);
+    EVP_PKEY_free(evp);
+    if (!rsa) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    int key_size = RSA_size(rsa);
+    uint8_t* output = (uint8_t*)malloc((size_t)key_size);
+    if (!output) {
+        RSA_free(rsa);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    int result = RSA_public_encrypt((int)input_len, input, output, rsa, RSA_PKCS1_OAEP_PADDING);
+    RSA_free(rsa);
+    if (result <= 0) {
+        free(output);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    if (out_len) *out_len = (size_t)result;
+    return output;
+}
+
+uint32_t sk_crypto_crc32(const uint8_t* data, size_t len) {
+    if (!data || len == 0) return 0;
+
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1) {
+                crc = (crc >> 1) ^ 0xEDB88320;
+            } else {
+                crc = crc >> 1;
+            }
+        }
+    }
+    return crc ^ 0xFFFFFFFF;
 }
 
 bool sk_crypto_is_available(void) {

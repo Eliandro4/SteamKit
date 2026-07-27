@@ -42,6 +42,15 @@ uint8_t* sk_crypto_rsa_encrypt(const uint8_t* input, size_t input_len,
                                const uint8_t* public_key, size_t key_len,
                                size_t* out_len);
 
+// RSA encryption with OAEP-SHA1 padding (used for channel encryption)
+// public_key should be a DER-encoded SubjectPublicKeyInfo
+uint8_t* sk_crypto_rsa_encrypt_oaep_sha1(const uint8_t* input, size_t input_len,
+                                         const uint8_t* public_key, size_t key_len,
+                                         size_t* out_len);
+
+// CRC32 calculation
+uint32_t sk_crypto_crc32(const uint8_t* data, size_t len);
+
 // Base64 encode
 char* sk_crypto_base64_encode(const uint8_t* input, size_t input_len);
 

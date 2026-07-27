@@ -12,6 +12,7 @@
 
 typedef struct sk_unified_pending_request {
     char* job_name;
+    uint64_t job_id;
     sk_unified_response_fn response_cb;
     void* response_user_data;
     struct sk_unified_pending_request* next;
@@ -28,6 +29,7 @@ struct sk_steam_unified_messages {
     sk_unified_service_t** services;
     size_t service_count;
     size_t service_capacity;
+    uint64_t next_job_id;
 };
 
 static char* sk_strdup(const char* s) {
@@ -43,7 +45,11 @@ static void sk_steam_unified_messages_handle_msg(struct sk_client_msg_handler* h
     sk_steam_unified_messages_t* um = (sk_steam_unified_messages_t*)handler;
 
     uint32_t msg_type = sk_packet_msg_msg_type(packet_msg);
-    if (msg_type != SK_EMSG_SERVICE_METHOD_RESPONSE) return;
+    sk_debug_log_info("Unified", "Received msg_type=%u", msg_type);
+    if (msg_type != SK_EMSG_SERVICE_METHOD_RESPONSE) {
+        sk_debug_log_info("Unified", "Ignoring non-response msg_type=%u", msg_type);
+        return;
+    }
 
     size_t data_len = 0;
     const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
@@ -53,25 +59,33 @@ static void sk_steam_unified_messages_handle_msg(struct sk_client_msg_handler* h
     if (!proto) return;
 
     CMsgProtoBufHeader* hdr = sk_client_msg_protobuf_header(proto);
-    if (!hdr || !hdr->target_job_name) {
+    if (!hdr) {
         sk_client_msg_protobuf_destroy(proto);
         return;
     }
 
     const char* target_job_name = hdr->target_job_name;
     uint32_t eresult = hdr->has_eresult ? hdr->eresult : 0;
+    uint64_t response_job_id = hdr->has_jobid_target ? hdr->jobid_target : 0;
 
     sk_unified_pending_request_t* req = um->pending_requests;
     sk_unified_pending_request_t* prev = NULL;
     while (req) {
-        if (strcmp(req->job_name, target_job_name) == 0 && req->response_cb) {
+        bool matched = false;
+        if (response_job_id != 0 && req->job_id != 0 && req->job_id == response_job_id) {
+            matched = true;
+        } else if (target_job_name && req->job_name && strcmp(req->job_name, target_job_name) == 0) {
+            matched = true;
+        }
+
+        if (matched && req->response_cb) {
+            sk_debug_log_info("Unified", "Matched pending request job_id=%llu job_name=%s",
+                (unsigned long long)req->job_id, target_job_name ? target_job_name : "(null)");
             if (prev) prev->next = req->next;
             else um->pending_requests = req->next;
             const uint8_t* body = NULL;
             size_t body_len = 0;
-            if (proto) {
-                body = sk_client_msg_protobuf_get_body(proto, &body_len);
-            }
+            body = sk_client_msg_protobuf_get_body(proto, &body_len);
             req->response_cb(req->response_user_data, body, body_len, eresult);
             free(req->job_name);
             free(req);
@@ -79,6 +93,10 @@ static void sk_steam_unified_messages_handle_msg(struct sk_client_msg_handler* h
         }
         prev = req;
         req = req->next;
+    }
+    if (!req) {
+        sk_debug_log_warn("Unified", "No pending request matched job_id=%llu job_name=%s",
+            (unsigned long long)response_job_id, target_job_name ? target_job_name : "(null)");
     }
 
     sk_client_msg_protobuf_destroy(proto);
@@ -146,13 +164,26 @@ void sk_steam_unified_messages_remove_service(sk_steam_unified_messages_t* um, c
 }
 
 void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
-                                            sk_unified_service_t* service,
-                                            const char* method_name,
-                                            const uint8_t* request_body,
-                                            size_t request_body_len,
-                                            uint32_t routing_appid,
-                                            sk_unified_response_fn response_cb,
-                                            void* response_user_data) {
+                                             sk_unified_service_t* service,
+                                             const char* method_name,
+                                             const uint8_t* request_body,
+                                             size_t request_body_len,
+                                             uint32_t routing_appid,
+                                             sk_unified_response_fn response_cb,
+                                             void* response_user_data) {
+    sk_steam_unified_messages_send_request_ex(um, service, method_name, request_body, request_body_len,
+        routing_appid, response_cb, response_user_data, SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT);
+}
+
+void sk_steam_unified_messages_send_request_ex(sk_steam_unified_messages_t* um,
+                                               sk_unified_service_t* service,
+                                               const char* method_name,
+                                               const uint8_t* request_body,
+                                               size_t request_body_len,
+                                               uint32_t routing_appid,
+                                               sk_unified_response_fn response_cb,
+                                               void* response_user_data,
+                                               sk_emsg_t msg_type) {
     if (!um || !service || !method_name || !response_cb) return;
 
     size_t method_len = strlen(method_name);
@@ -161,7 +192,7 @@ void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
     if (!job_name) return;
     snprintf(job_name, job_name_len, "%s.%s#1", service->name, method_name);
 
-    sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT);
+    sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(msg_type);
     if (!msg) {
         free(job_name);
         return;
@@ -172,6 +203,12 @@ void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
         hdr->target_job_name = job_name;
         hdr->routing_appid = routing_appid;
         hdr->has_routing_appid = 1;
+        um->next_job_id++;
+        if (um->next_job_id == 0) {
+            um->next_job_id = 1;
+        }
+        hdr->has_jobid_source = true;
+        hdr->jobid_source = um->next_job_id;
     }
 
     if (request_body && request_body_len > 0) {
@@ -185,6 +222,8 @@ void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
         return;
     }
 
+    sk_debug_log_info("Unified", "Sending request %s.%s#1 job_name=%s", service->name, method_name, job_name);
+
     sk_unified_pending_request_t* pending = (sk_unified_pending_request_t*)calloc(1, sizeof(*pending));
     if (!pending) {
         sk_packet_msg_destroy(pkt);
@@ -193,6 +232,7 @@ void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
         return;
     }
     pending->job_name = job_name;
+    pending->job_id = hdr ? hdr->jobid_source : 0;
     pending->response_cb = response_cb;
     pending->response_user_data = response_user_data;
     pending->next = um->pending_requests;

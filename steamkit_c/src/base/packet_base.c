@@ -1,5 +1,7 @@
 #include "steamkit/base/packet_base.h"
 #include "steamkit/base/client_msg.h"
+#include "steamkit/base/emsg.h"
+#include "steamkit/base/msg_hdr.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -75,11 +77,24 @@ sk_packet_msg_t* sk_packet_msg_create_from_client_msg(const sk_client_msg_t* cli
 }
 
 sk_packet_msg_t* sk_packet_msg_create_from_buffer(const uint8_t* buffer, size_t len) {
-    if (!buffer || len < 20) return NULL;
+    if (!buffer || len < 4) return NULL;
     uint32_t emsg;
     memcpy(&emsg, buffer, 4);
-    sk_packet_msg_t* pkt = sk_packet_msg_create(emsg, false);
+    bool is_proto = (emsg & SK_EMSG_PROTO_MASK) != 0;
+    uint32_t msg_type = emsg & ~SK_EMSG_PROTO_MASK;
+    sk_packet_msg_t* pkt = sk_packet_msg_create(msg_type, is_proto);
     if (!pkt) return NULL;
+
+    if (is_proto) {
+        sk_packet_msg_set_data(pkt, buffer, len);
+        return pkt;
+    }
+
+    if (len < 20) {
+        sk_packet_msg_destroy(pkt);
+        return NULL;
+    }
+
     sk_msg_hdr_t hdr;
     if (sk_msg_hdr_deserialize(&hdr, buffer, len)) {
         sk_packet_msg_set_job_ids(pkt, hdr.target_job_id.base.value, hdr.source_job_id.base.value);

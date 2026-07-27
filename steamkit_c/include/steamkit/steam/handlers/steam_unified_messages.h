@@ -22,13 +22,23 @@ sk_unified_service_t* sk_steam_unified_messages_create_service(sk_steam_unified_
 void sk_steam_unified_messages_remove_service(sk_steam_unified_messages_t* um, const char* service_name);
 
 void sk_steam_unified_messages_send_request(sk_steam_unified_messages_t* um,
-                                            sk_unified_service_t* service,
-                                            const char* method_name,
-                                            const uint8_t* request_body,
-                                            size_t request_body_len,
-                                            uint32_t routing_appid,
-                                            sk_unified_response_fn response_cb,
-                                            void* response_user_data);
+                                             sk_unified_service_t* service,
+                                             const char* method_name,
+                                             const uint8_t* request_body,
+                                             size_t request_body_len,
+                                             uint32_t routing_appid,
+                                             sk_unified_response_fn response_cb,
+                                             void* response_user_data);
+
+void sk_steam_unified_messages_send_request_ex(sk_steam_unified_messages_t* um,
+                                               sk_unified_service_t* service,
+                                               const char* method_name,
+                                               const uint8_t* request_body,
+                                               size_t request_body_len,
+                                               uint32_t routing_appid,
+                                               sk_unified_response_fn response_cb,
+                                               void* response_user_data,
+                                               uint32_t msg_type);
 
 #ifdef __cplusplus
 }

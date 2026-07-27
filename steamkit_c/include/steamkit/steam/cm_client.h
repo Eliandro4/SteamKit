@@ -37,6 +37,8 @@ sk_cm_client_t* sk_cm_client_create(sk_steam_configuration_t* config, const char
 void sk_cm_client_destroy(sk_cm_client_t* client);
 
 bool sk_cm_client_is_connected(const sk_cm_client_t* client);
+bool sk_cm_client_is_channel_encrypted(const sk_cm_client_t* client);
+void sk_cm_client_send_payload(sk_cm_client_t* client, const uint8_t* data, size_t len);
 void sk_cm_client_connect(sk_cm_client_t* client);
 void sk_cm_client_disconnect(sk_cm_client_t* client, bool user_initiated);
 
@@ -57,6 +59,9 @@ void sk_cm_client_on_packet_received(sk_cm_client_t* client, const sk_packet_msg
 
 void sk_cm_client_set_server_list(sk_cm_client_t* client, const sk_cm_server_t* servers, size_t count);
 const sk_cm_server_t* sk_cm_client_get_server_list(const sk_cm_client_t* client, size_t* out_count);
+void sk_cm_client_set_cell_id(sk_cm_client_t* client, uint32_t cell_id);
+uint32_t sk_cm_client_get_cell_id(const sk_cm_client_t* client);
+bool sk_cm_client_fetch_server_list(sk_cm_client_t* client, uint32_t cell_id);
 
 #ifdef __cplusplus
 }

@@ -1,123 +1,162 @@
+#define _GNU_SOURCE
 #include "steamkit/networking/websocket_connection.h"
 #include "steamkit/networking/connection.h"
+#include "steamkit/base/emsg.h"
+#include "steamkit/base/msg_hdr.h"
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef SK_ENABLE_CURL
 #include <curl/curl.h>
 #include <pthread.h>
+#include <errno.h>
+#include <unistd.h>
 #endif
 
 typedef struct sk_websocket_connection {
     sk_connection_t base;
     sk_websocket_context_t context;
-    void* http_client;
+#ifdef SK_ENABLE_CURL
+    CURL* curl;
     bool connected;
+    bool running;
+    pthread_t thread;
+    uint8_t* recv_buf;
+    size_t recv_len;
+    size_t recv_cap;
+    pthread_mutex_t buf_mutex;
+    pthread_cond_t buf_cond;
+    char error_buf[CURL_ERROR_SIZE];
+#endif
 } sk_websocket_connection_t;
 
 #ifdef SK_ENABLE_CURL
 
-typedef struct {
-    sk_websocket_connection_t* ws;
-    CURL* curl;
-    bool running;
-    pthread_t thread;
-    uint8_t* buf;
-    size_t buf_len;
-    size_t buf_cap;
-    char error_buf[CURL_ERROR_SIZE];
-} ws_internal_t;
+#define WS_TCP_MAGIC 0x31305456U
 
-static size_t ws_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
-    ws_internal_t* internal = (ws_internal_t*)userdata;
-    size_t total = size * nmemb;
-    if (!internal || !internal->buf) return 0;
-    if (internal->buf_len + total > internal->buf_cap) {
-        size_t new_cap = internal->buf_cap * 2 + total;
-        uint8_t* new_buf = (uint8_t*)realloc(internal->buf, new_cap);
-        if (!new_buf) return 0;
-        internal->buf = new_buf;
-        internal->buf_cap = new_cap;
+static void ws_process_pending_messages(sk_websocket_connection_t* ws) {
+    if (!ws || !ws->base.net_msg_callback) return;
+
+    while (ws->recv_len >= 24) {
+        uint32_t msg_len;
+        memcpy(&msg_len, ws->recv_buf, 4);
+        uint32_t msg_magic;
+        memcpy(&msg_magic, ws->recv_buf + 4, 4);
+        if (msg_magic != WS_TCP_MAGIC) {
+            break;
+        }
+        if (ws->recv_len < 8U + (size_t)msg_len) break;
+
+        const uint8_t* payload = ws->recv_buf + 8;
+        size_t payload_len = (size_t)msg_len;
+
+        sk_emsg_t emsg = SK_EMSG_INVALID;
+        if (payload_len >= 20) {
+            sk_msg_hdr_t hdr;
+            if (sk_msg_hdr_deserialize(&hdr, payload, payload_len)) {
+                emsg = hdr.msg;
+            }
+        }
+
+        ws->base.net_msg_callback(ws->base.user_data,
+                                    payload,
+                                    payload_len,
+                                    emsg);
+
+        memmove(ws->recv_buf,
+                ws->recv_buf + 8 + (size_t)msg_len,
+                ws->recv_len - 8U - (size_t)msg_len);
+        ws->recv_len -= 8U + (size_t)msg_len;
     }
-    memcpy(internal->buf + internal->buf_len, ptr, total);
-    internal->buf_len += total;
-    return total;
 }
 
 static void* ws_recv_thread(void* arg) {
-    ws_internal_t* internal = (ws_internal_t*)arg;
-    if (!internal) return NULL;
+    sk_websocket_connection_t* ws = (sk_websocket_connection_t*)arg;
+    if (!ws || !ws->curl) return NULL;
 
-    sk_websocket_connection_t* ws = internal->ws;
-    CURLcode res = curl_easy_perform(internal->curl);
-
-    internal->running = false;
-
-    if (res != CURLE_OK && internal->buf_len == 0) {
-        if (ws->base.disconnected_callback) {
-            ws->base.disconnected_callback(ws->base.user_data, true);
+    uint8_t tmp[4096];
+    while (ws->running) {
+        size_t nread = 0;
+        const struct curl_ws_frame* metap = NULL;
+        CURLcode rc = curl_ws_recv(ws->curl, tmp, sizeof(tmp), &nread, &metap);
+        if (rc == CURLE_AGAIN) {
+            usleep(1000);
+            continue;
         }
-        return NULL;
+        if (rc != CURLE_OK || nread == 0) {
+            break;
+        }
+
+        pthread_mutex_lock(&ws->buf_mutex);
+        if (ws->recv_len + nread > ws->recv_cap) {
+            size_t new_cap = ws->recv_cap * 2 + nread;
+            uint8_t* new_buf = (uint8_t*)realloc(ws->recv_buf, new_cap);
+            if (!new_buf) {
+                pthread_mutex_unlock(&ws->buf_mutex);
+                break;
+            }
+            ws->recv_buf = new_buf;
+            ws->recv_cap = new_cap;
+        }
+        memcpy(ws->recv_buf + ws->recv_len, tmp, nread);
+        ws->recv_len += nread;
+        ws_process_pending_messages(ws);
+        pthread_cond_signal(&ws->buf_cond);
+        pthread_mutex_unlock(&ws->buf_mutex);
     }
 
-    if (internal->buf_len > 0 && ws->base.net_msg_callback) {
-        ws->base.net_msg_callback(ws->base.user_data,
-                                    internal->buf,
-                                    internal->buf_len,
-                                    SK_EMSG_INVALID);
-    }
-
+    ws->running = false;
     if (ws->base.disconnected_callback) {
         ws->base.disconnected_callback(ws->base.user_data, true);
     }
-
     return NULL;
 }
 
 static bool ws_do_connect(sk_websocket_connection_t* ws, const char* url, int timeout_ms) {
-    ws_internal_t* internal = (ws_internal_t*)calloc(1, sizeof(ws_internal_t));
-    if (!internal) return false;
+    if (!ws || !url) return false;
 
-    internal->ws = ws;
-    internal->curl = curl_easy_init();
-    if (!internal->curl) {
-        free(internal);
+    ws->curl = curl_easy_init();
+    if (!ws->curl) return false;
+
+    curl_easy_setopt(ws->curl, CURLOPT_URL, url);
+    curl_easy_setopt(ws->curl, CURLOPT_CONNECT_ONLY, 2L);
+    curl_easy_setopt(ws->curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
+    curl_easy_setopt(ws->curl, CURLOPT_ERRORBUFFER, ws->error_buf);
+    curl_easy_setopt(ws->curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(ws->curl, CURLOPT_SSL_VERIFYHOST, 2L);
+
+    CURLcode rc = curl_easy_perform(ws->curl);
+    if (rc != CURLE_OK) {
+        curl_easy_cleanup(ws->curl);
+        ws->curl = NULL;
         return false;
     }
 
-    internal->buf_cap = 4096;
-    internal->buf = (uint8_t*)malloc(internal->buf_cap);
-    if (!internal->buf) {
-        curl_easy_cleanup(internal->curl);
-        free(internal);
+    ws->recv_cap = 4096;
+    ws->recv_buf = (uint8_t*)malloc(ws->recv_cap);
+    if (!ws->recv_buf) {
+        curl_easy_cleanup(ws->curl);
+        ws->curl = NULL;
         return false;
     }
 
-    curl_easy_setopt(internal->curl, CURLOPT_URL, url);
-    curl_easy_setopt(internal->curl, CURLOPT_WRITEFUNCTION, ws_write_cb);
-    curl_easy_setopt(internal->curl, CURLOPT_WRITEDATA, internal);
-    curl_easy_setopt(internal->curl, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms);
-    curl_easy_setopt(internal->curl, CURLOPT_ERRORBUFFER, internal->error_buf);
-    curl_easy_setopt(internal->curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(internal->curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(internal->curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    pthread_mutex_init(&ws->buf_mutex, NULL);
+    pthread_cond_init(&ws->buf_cond, NULL);
 
-    internal->running = true;
-    if (pthread_create(&internal->thread, NULL, ws_recv_thread, internal) != 0) {
-        curl_easy_cleanup(internal->curl);
-        free(internal->buf);
-        free(internal);
+    ws->running = true;
+    if (pthread_create(&ws->thread, NULL, ws_recv_thread, ws) != 0) {
+        free(ws->recv_buf);
+        ws->recv_buf = NULL;
+        curl_easy_cleanup(ws->curl);
+        ws->curl = NULL;
         return false;
     }
 
-    ws->http_client = internal;
     ws->connected = true;
     ws->base.is_connected = true;
-
     if (ws->base.connected_callback) {
         ws->base.connected_callback(ws->base.user_data);
     }
-
     return true;
 }
 
@@ -156,17 +195,11 @@ sk_websocket_connection_t* sk_websocket_connection_create(const sk_websocket_con
 
 void sk_websocket_connection_destroy(sk_websocket_connection_t* ws) {
     if (!ws) return;
-    if (ws->http_client) {
+    sk_websocket_connection_disconnect(ws, true);
 #ifdef SK_ENABLE_CURL
-        ws_internal_t* internal = (ws_internal_t*)ws->http_client;
-        internal->running = false;
-        curl_easy_cleanup(internal->curl);
-        pthread_join(internal->thread, NULL);
-        free(internal->buf);
-        free(internal);
+    pthread_mutex_destroy(&ws->buf_mutex);
+    pthread_cond_destroy(&ws->buf_cond);
 #endif
-        ws->http_client = NULL;
-    }
     free((void*)ws->context.url);
     if (ws->context.subprotocols) {
         for (size_t i = 0; i < ws->context.subprotocol_count; ++i) {
@@ -191,19 +224,83 @@ bool sk_websocket_connection_connect(sk_websocket_connection_t* ws, const char* 
 
 void sk_websocket_connection_disconnect(sk_websocket_connection_t* ws, bool user_initiated) {
     if (!ws) return;
-    if (ws->http_client) {
 #ifdef SK_ENABLE_CURL
-        ws_internal_t* internal = (ws_internal_t*)ws->http_client;
-        internal->running = false;
-        curl_easy_cleanup(internal->curl);
-        pthread_join(internal->thread, NULL);
-        free(internal->buf);
-        free(internal);
-#endif
-        ws->http_client = NULL;
+    if (ws->curl) {
+        ws->running = false;
+        curl_easy_cleanup(ws->curl);
+        ws->curl = NULL;
+        if (ws->thread) {
+            pthread_join(ws->thread, NULL);
+            ws->thread = 0;
+        }
+        free(ws->recv_buf);
+        ws->recv_buf = NULL;
+        ws->recv_len = 0;
+        ws->recv_cap = 0;
     }
+#endif
     ws->connected = false;
+    ws->base.is_connected = false;
     if (ws->base.disconnected_callback) {
         ws->base.disconnected_callback(ws->base.user_data, user_initiated);
     }
 }
+
+void sk_websocket_connection_send(sk_websocket_connection_t* ws, const uint8_t* data, size_t len) {
+    if (!ws || !data || len == 0) return;
+#ifdef SK_ENABLE_CURL
+    if (!ws->curl || !ws->connected) return;
+    size_t sent = 0;
+    curl_ws_send(ws->curl, data, len, &sent, 0, CURLWS_BINARY);
+#else
+    (void)data;
+    (void)len;
+#endif
+}
+
+ssize_t sk_websocket_connection_recv(sk_websocket_connection_t* ws, uint8_t* buf, size_t buf_len, int timeout_ms) {
+    if (!ws || !buf || buf_len == 0) return -1;
+#ifdef SK_ENABLE_CURL
+    if (!ws->curl || !ws->connected) return -1;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1000000000;
+    }
+
+    pthread_mutex_lock(&ws->buf_mutex);
+    while (ws->running && ws->recv_len == 0) {
+        if (timeout_ms < 0) {
+            pthread_cond_wait(&ws->buf_cond, &ws->buf_mutex);
+        } else {
+            if (pthread_cond_timedwait(&ws->buf_cond, &ws->buf_mutex, &ts) != 0) {
+                pthread_mutex_unlock(&ws->buf_mutex);
+                return 0;
+            }
+        }
+    }
+    if (!ws->running && ws->recv_len == 0) {
+        pthread_mutex_unlock(&ws->buf_mutex);
+        return 0;
+    }
+
+    size_t to_copy = ws->recv_len < buf_len ? ws->recv_len : buf_len;
+    memcpy(buf, ws->recv_buf, to_copy);
+    if (to_copy < ws->recv_len) {
+        memmove(ws->recv_buf, ws->recv_buf + to_copy, ws->recv_len - to_copy);
+    }
+    ws->recv_len -= to_copy;
+    pthread_mutex_unlock(&ws->buf_mutex);
+    return (ssize_t)to_copy;
+#else
+    (void)buf;
+    (void)buf_len;
+    (void)timeout_ms;
+    return -1;
+#endif
+}
+

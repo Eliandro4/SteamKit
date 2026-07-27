@@ -21,9 +21,9 @@ typedef enum sk_emsg {
     SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED  = 9804,
 
     // Connection / session
-    SK_EMSG_CHANNEL_ENCRYPT_REQUEST                     = 0x40000008,
-    SK_EMSG_CHANNEL_ENCRYPT_RESPONSE                    = 0x40000009,
-    SK_EMSG_CHANNEL_ENCRYPT_RESULT                      = 0x4000000A,
+    SK_EMSG_CHANNEL_ENCRYPT_REQUEST                     = 1303,  // k_EMsgChannelEncryptRequest
+    SK_EMSG_CHANNEL_ENCRYPT_RESPONSE                    = 1304,  // k_EMsgChannelEncryptResponse
+    SK_EMSG_CHANNEL_ENCRYPT_RESULT                      = 1305,  // k_EMsgChannelEncryptResult
     SK_EMSG_DISCONNECT_NOTIFY                           = 0x40000002,
 
     // Client session

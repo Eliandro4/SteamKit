@@ -3,6 +3,8 @@
 #include "steamkit/steam/cm_client.h"
 #include "steamkit/steam/steam_client/configuration/steam_configuration.h"
 #include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/steam/handlers/steam_user.h"
+#include "steamkit/steam/handlers/steam_unified_messages.h"
 #include "steamkit/base/packet_base.h"
 #include "steamkit/utils/debug_log.h"
 #include <stdlib.h>
@@ -62,6 +64,16 @@ sk_steam_client_t* sk_steam_client_create_with_config(sk_steam_configuration_t* 
     }
     pthread_mutex_init(&client->callback_mutex, NULL);
     pthread_cond_init(&client->callback_cond, NULL);
+
+    sk_steam_unified_messages_t* um = sk_steam_unified_messages_create();
+    if (um) {
+        sk_steam_client_add_handler(client, (struct sk_client_msg_handler*)um);
+    }
+    sk_steam_user_t* user = sk_steam_user_create();
+    if (user) {
+        sk_steam_client_add_handler(client, (struct sk_client_msg_handler*)user);
+    }
+
     return client;
 }
 
@@ -84,8 +96,15 @@ void sk_steam_client_destroy(sk_steam_client_t* client) {
     free(client);
 }
 
+void sk_steam_client_set_cell_id(sk_steam_client_t* client, uint32_t cell_id) {
+    if (client && client->base) {
+        sk_cm_client_set_cell_id(client->base, cell_id);
+    }
+}
+
 void sk_steam_client_connect(sk_steam_client_t* client) {
     if (!client) return;
+    sk_cm_client_fetch_server_list(client->base, sk_cm_client_get_cell_id(client->base));
     sk_cm_client_connect(client->base);
 }
 
@@ -96,6 +115,10 @@ void sk_steam_client_disconnect(sk_steam_client_t* client, bool user_initiated) 
 
 bool sk_steam_client_is_connected(const sk_steam_client_t* client) {
     return client ? sk_cm_client_is_connected(client->base) : false;
+}
+
+bool sk_steam_client_is_channel_ready(const sk_steam_client_t* client) {
+    return client ? sk_cm_client_is_channel_encrypted(client->base) : false;
 }
 
 sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client) {
@@ -117,6 +140,7 @@ void sk_steam_client_log_off(sk_steam_client_t* client) {
 
 void sk_steam_client_add_handler(sk_steam_client_t* client, struct sk_client_msg_handler* handler) {
     if (!client || !handler) return;
+    sk_client_msg_handler_setup(handler, client);
     if (client->handler_count >= client->handler_capacity) {
         size_t new_cap = client->handler_capacity * 2;
         sk_client_msg_handler_t** new_handlers = (sk_client_msg_handler_t**)realloc(
@@ -144,19 +168,23 @@ sk_steam_unified_messages_t* sk_steam_client_get_unified_messages(const sk_steam
 
 void sk_steam_client_dispatch_msg(sk_steam_client_t* client, const sk_packet_msg_t* packet_msg) {
     if (!client || !packet_msg) return;
+    uint32_t msg_type = sk_packet_msg_msg_type(packet_msg);
+    sk_debug_log_info("SteamClient", "Dispatching msg_type=%u is_proto=%d to %zu handlers",
+        msg_type, sk_packet_msg_is_proto(packet_msg), client->handler_count);
     for (size_t i = 0; i < client->handler_count; ++i) {
         if (client->handlers[i] && client->handlers[i]->handle_msg) {
+            sk_debug_log_info("SteamClient", "  Handler[%zu] type=%d", i, client->handlers[i]->handler_type);
             client->handlers[i]->handle_msg(client->handlers[i], packet_msg);
         }
     }
 }
 
 void sk_steam_client_send(sk_steam_client_t* client, sk_packet_msg_t* packet_msg) {
-    if (!client || !packet_msg) return;
+    if (!client || !packet_msg || !client->base) return;
     size_t data_len = 0;
     const uint8_t* data = sk_packet_msg_data(packet_msg, &data_len);
     if (data && data_len > 0) {
-        sk_connection_send(sk_cm_client_connection(client->base), data, data_len);
+        sk_cm_client_send_payload(client->base, data, data_len);
     }
 }
 

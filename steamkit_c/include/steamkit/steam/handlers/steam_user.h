@@ -27,6 +27,7 @@ typedef struct sk_log_on_details {
     char* two_factor_code;
     bool should_remember_password;
     char* access_token;
+    uint64_t steam_id;
     uint32_t account_instance;
     char* machine_name;
 } sk_log_on_details_t;

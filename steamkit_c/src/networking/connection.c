@@ -1,4 +1,6 @@
 #include "steamkit/networking/connection.h"
+#include "steamkit/networking/tcp_connection.h"
+#include "steamkit/networking/websocket_connection.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,15 +11,21 @@ void sk_connection_connect(sk_connection_t* conn, const char* host, uint16_t por
 }
 
 void sk_connection_disconnect(sk_connection_t* conn, bool user_initiated) {
-    if (!conn || !conn->vtable) return;
-    typedef void (*disconnect_fn)(sk_connection_t*, bool);
-    ((disconnect_fn)conn->vtable)(conn, user_initiated);
+    if (!conn) return;
+    if (conn->protocol == SK_PROTOCOL_TYPE_TCP) {
+        sk_tcp_connection_disconnect((sk_tcp_connection_t*)conn, user_initiated);
+    } else if (conn->protocol == SK_PROTOCOL_TYPE_WEBSOCKET) {
+        sk_websocket_connection_disconnect((sk_websocket_connection_t*)conn, user_initiated);
+    }
 }
 
 void sk_connection_send(sk_connection_t* conn, const uint8_t* data, size_t len) {
-    if (!conn || !conn->vtable) return;
-    typedef void (*send_fn)(sk_connection_t*, const uint8_t*, size_t);
-    ((send_fn)conn->vtable)(conn, data, len);
+    if (!conn || !data || len == 0) return;
+    if (conn->protocol == SK_PROTOCOL_TYPE_TCP) {
+        sk_tcp_connection_send((sk_tcp_connection_t*)conn, data, len);
+    } else if (conn->protocol == SK_PROTOCOL_TYPE_WEBSOCKET) {
+        sk_websocket_connection_send((sk_websocket_connection_t*)conn, data, len);
+    }
 }
 
 const char* sk_connection_get_local_ip(const sk_connection_t* conn) {

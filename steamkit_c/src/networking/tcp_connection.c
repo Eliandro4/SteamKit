@@ -1,9 +1,13 @@
 #define _DEFAULT_SOURCE
 #include "steamkit/networking/tcp_connection.h"
 #include "steamkit/networking/connection.h"
+#include "steamkit/base/emsg.h"
 #include "steamkit/base/msg_hdr.h"
+#include "steamkit/utils/debug_log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -15,6 +19,7 @@
 #include <pthread.h>
 
 #define TCP_RECV_BUF_SIZE 65536
+#define TCP_MAGIC 0x31305456U
 
 struct sk_tcp_connection {
     sk_connection_t base;
@@ -41,23 +46,25 @@ static void* tcp_recv_thread(void* arg) {
                           0);
         if (n <= 0) {
             if (n < 0 && errno == EINTR) continue;
-            if (tcp->running) {
-                tcp->connected = false;
-                if (tcp->base.disconnected_callback) {
-                    tcp->base.disconnected_callback(tcp->base.user_data, true);
-                }
-            }
+            sk_debug_log_warn("TCPConnection", "recv failed/closed: n=%zd errno=%d (%s)", n, errno, strerror(errno));
             break;
         }
+
+        sk_debug_log_debug("TCPConnection", "recv received %zd bytes", n);
 
         tcp->recv_len += (size_t)n;
 
         while (tcp->recv_len >= 24) {
             uint32_t msg_len;
             memcpy(&msg_len, tcp->recv_buf, 4);
-            if (tcp->recv_len < 4U + (size_t)msg_len) break;
+            uint32_t msg_magic;
+            memcpy(&msg_magic, tcp->recv_buf + 4, 4);
+            if (msg_magic != TCP_MAGIC) {
+                break;
+            }
+            if (tcp->recv_len < 8U + (size_t)msg_len) break;
 
-            const uint8_t* payload = tcp->recv_buf + 4;
+            const uint8_t* payload = tcp->recv_buf + 8;
             size_t payload_len = (size_t)msg_len;
 
             sk_emsg_t emsg = SK_EMSG_INVALID;
@@ -76,11 +83,12 @@ static void* tcp_recv_thread(void* arg) {
             }
 
             memmove(tcp->recv_buf,
-                    tcp->recv_buf + 4 + (size_t)msg_len,
-                    tcp->recv_len - 4U - (size_t)msg_len);
-            tcp->recv_len -= 4U + (size_t)msg_len;
+                    tcp->recv_buf + 8 + (size_t)msg_len,
+                    tcp->recv_len - 8U - (size_t)msg_len);
+            tcp->recv_len -= 8U + (size_t)msg_len;
         }
     }
+
 
     return NULL;
 }
@@ -177,6 +185,7 @@ static int tcp_connect_internal(sk_tcp_connection_t* tcp, const char* host, uint
 
     tcp->sockfd = sockfd;
     tcp->connected = true;
+    tcp->base.is_connected = true;
     strncpy(tcp->host, host, sizeof(tcp->host) - 1);
     tcp->port = port;
 
@@ -188,7 +197,9 @@ void sk_tcp_connection_connect(sk_tcp_connection_t* tcp, const char* host, uint1
     if (!tcp || !host) return;
     if (tcp->connected) return;
 
-    if (tcp_connect_internal(tcp, host, port, timeout_ms) != 0) return;
+    if (tcp_connect_internal(tcp, host, port, timeout_ms) != 0) {
+        return;
+    }
 
     tcp->running = true;
     if (pthread_create(&tcp->thread, NULL, tcp_recv_thread, tcp) != 0) {
@@ -208,6 +219,7 @@ void sk_tcp_connection_disconnect(sk_tcp_connection_t* tcp, bool user_initiated)
     if (!tcp) return;
 
     bool was_connected = tcp->connected;
+    sk_debug_log_info("TCPConnection", "Disconnecting, was_connected=%d user_initiated=%d", was_connected, user_initiated);
     tcp->running = false;
     tcp->connected = false;
     tcp->base.is_connected = false;
@@ -231,34 +243,34 @@ void sk_tcp_connection_disconnect(sk_tcp_connection_t* tcp, bool user_initiated)
 void sk_tcp_connection_send(sk_tcp_connection_t* tcp, const uint8_t* data, size_t len) {
     if (!tcp || !data || len == 0) return;
 
-    uint8_t header[4];
-    memcpy(header, &len, 4);
+    uint32_t be_len = (uint32_t)len;
+    uint32_t be_magic = TCP_MAGIC;
+    uint8_t header[8];
+    memcpy(header, &be_len, 4);
+    memcpy(header + 4, &be_magic, 4);
 
-    ssize_t total_sent = 0;
-    ssize_t ret;
-
-    ret = send(tcp->sockfd, header, 4, 0);
-    if (ret < 0) {
-        if (errno == EINTR) ret = 0;
-        else goto send_error;
+    ssize_t hdr_sent = send(tcp->sockfd, header, 8, 0);
+    if (hdr_sent != 8) {
+        sk_debug_log_warn("TCPConnection", "Failed to send TCP frame header");
+        return;
     }
-    total_sent = ret;
 
-    while ((size_t)total_sent < len) {
-        ret = send(tcp->sockfd, data + total_sent, (size_t)(len - total_sent), 0);
+    size_t payload_sent = 0;
+    sk_debug_log_debug("TCPConnection", "Sending %zu byte payload", len);
+    while (payload_sent < len) {
+        ssize_t ret = send(tcp->sockfd, data + payload_sent, len - payload_sent, 0);
         if (ret < 0) {
             if (errno == EINTR) continue;
-            goto send_error;
+            sk_debug_log_warn("TCPConnection", "Send failed: errno=%d (%s), closing connection", errno, strerror(errno));
+            tcp->connected = false;
+            if (tcp->base.disconnected_callback) {
+                tcp->base.disconnected_callback(tcp->base.user_data, true);
+            }
+            return;
         }
-        total_sent += ret;
+        payload_sent += (size_t)ret;
     }
-    return;
-
-send_error:
-    tcp->connected = false;
-    if (tcp->base.disconnected_callback) {
-        tcp->base.disconnected_callback(tcp->base.user_data, true);
-    }
+    sk_debug_log_debug("TCPConnection", "Send complete: %zu payload bytes", payload_sent);
 }
 
 ssize_t sk_tcp_connection_recv(sk_tcp_connection_t* tcp, uint8_t* buf, size_t buf_len, int timeout_ms) {
