@@ -121,6 +121,14 @@ bool sk_steam_client_is_channel_ready(const sk_steam_client_t* client) {
     return client ? sk_cm_client_is_channel_encrypted(client->base) : false;
 }
 
+const sk_steam_id_t* sk_steam_client_get_steam_id(const sk_steam_client_t* client) {
+    return client ? sk_cm_client_steam_id(client->base) : NULL;
+}
+
+sk_cm_client_t* sk_steam_client_get_cm_client(sk_steam_client_t* client) {
+    return client ? client->base : NULL;
+}
+
 sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client) {
     if (!client) return NULL;
     static uint64_t sequence = 0;

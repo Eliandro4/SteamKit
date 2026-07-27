@@ -38,6 +38,8 @@ typedef struct sk_disconnected_callback {
 typedef struct sk_logged_on_callback {
     sk_callback_msg_t base;
     int result;
+    int extended_result;
+    sk_steam_id_t* client_steam_id;
 } sk_logged_on_callback_t;
 
 // Logged off callback
@@ -206,6 +208,7 @@ void sk_callback_msg_destroy(sk_callback_msg_t* msg);
 sk_connected_callback_t* sk_connected_callback_create(void);
 sk_disconnected_callback_t* sk_disconnected_callback_create(bool user_initiated);
 sk_logged_on_callback_t* sk_logged_on_callback_create(int result);
+void sk_logged_on_callback_destroy(sk_logged_on_callback_t* cb);
 sk_logged_off_callback_t* sk_logged_off_callback_create(int result);
 sk_session_token_callback_t* sk_session_token_callback_create(uint64_t session_token);
 sk_account_info_callback_t* sk_account_info_callback_create(const char* persona_name, const char* country, uint32_t count_authed_computers, uint32_t account_flags);
@@ -274,6 +277,27 @@ typedef struct sk_lobby_matchmaking_callback {
 
 sk_lobby_matchmaking_callback_t* sk_lobby_matchmaking_callback_create(uint32_t result, const uint64_t* lobby_steam_ids, uint32_t num_lobbies, const int32_t* lobby_types, const int32_t* distances);
 void sk_lobby_matchmaking_callback_destroy(sk_lobby_matchmaking_callback_t* cb);
+
+// SteamUser auth callbacks
+typedef struct sk_auth_code_required_callback {
+    sk_callback_msg_t base;
+    int confirmation_type;
+    char* associated_message;
+} sk_auth_code_required_callback_t;
+
+typedef struct sk_auth_result_callback {
+    sk_callback_msg_t base;
+    int result;
+    char* account_name;
+    char* refresh_token;
+    char* access_token;
+    char* new_guard_data;
+} sk_auth_result_callback_t;
+
+sk_auth_code_required_callback_t* sk_auth_code_required_callback_create(int confirmation_type, const char* associated_message);
+void sk_auth_code_required_callback_destroy(sk_auth_code_required_callback_t* cb);
+sk_auth_result_callback_t* sk_auth_result_callback_create(int result, const char* account_name, const char* refresh_token, const char* access_token, const char* new_guard_data);
+void sk_auth_result_callback_destroy(sk_auth_result_callback_t* cb);
 
 #ifdef __cplusplus
 }

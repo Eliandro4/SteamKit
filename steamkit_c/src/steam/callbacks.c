@@ -41,8 +41,18 @@ sk_disconnected_callback_t* sk_disconnected_callback_create(bool user_initiated)
 
 sk_logged_on_callback_t* sk_logged_on_callback_create(int result) {
     sk_logged_on_callback_t* cb = (sk_logged_on_callback_t*)calloc(1, sizeof(sk_logged_on_callback_t));
-    if (cb) cb->result = result;
+    if (cb) {
+        cb->result = result;
+        cb->extended_result = 0;
+        cb->client_steam_id = NULL;
+    }
     return cb;
+}
+
+void sk_logged_on_callback_destroy(sk_logged_on_callback_t* cb) {
+    if (!cb) return;
+    free(cb->client_steam_id);
+    free(cb);
 }
 
 sk_logged_off_callback_t* sk_logged_off_callback_create(int result) {

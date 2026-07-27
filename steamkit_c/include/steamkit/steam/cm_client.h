@@ -53,6 +53,8 @@ void sk_cm_client_post_callback(sk_cm_client_t* client, void* callback_msg);
 void sk_cm_client_set_steam_client(sk_cm_client_t* client, sk_steam_client_t* steam_client);
 sk_steam_client_t* sk_cm_client_get_steam_client(const sk_cm_client_t* client);
 
+void sk_cm_client_set_steam_id(sk_cm_client_t* client, const sk_steam_id_t* steam_id);
+
 void sk_cm_client_on_connected(sk_cm_client_t* client);
 void sk_cm_client_on_disconnected(sk_cm_client_t* client, bool user_initiated);
 void sk_cm_client_on_packet_received(sk_cm_client_t* client, const sk_packet_msg_t* packet_msg);

@@ -60,7 +60,7 @@ void sk_steam_game_server_begin_session(sk_steam_game_server_t* server, uint32_t
     if (!msg) return;
 
     CMsgClientLogon logon_msg = CMSG_CLIENT_LOGON__INIT;
-    logon_msg.protocol_version = 65580;
+    logon_msg.protocol_version = 65581;
     logon_msg.has_protocol_version = true;
     logon_msg.client_os_type = 10;
     logon_msg.has_client_os_type = true;

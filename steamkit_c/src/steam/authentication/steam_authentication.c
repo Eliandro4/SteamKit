@@ -36,7 +36,7 @@ static const char* sk_auth_guard_status_to_string(sk_auth_guard_status_t status)
 }
 
 static bool sk_auth_is_connected(sk_steam_client_t* client) {
-    return client && sk_steam_client_is_channel_ready(client);
+    return client && sk_steam_client_is_connected(client);
 }
 
 static int sk_auth_sort_allowed_confirmations_compare(const sk_auth_allowed_confirmation_t* a, const sk_auth_allowed_confirmation_t* b) {
@@ -252,8 +252,12 @@ uint8_t* sk_auth_poll_auth_session_status(sk_steam_client_t* client,
 
     size_t body_len = 0;
     uint32_t eresult = 0;
+    const sk_steam_id_t* steam_id = sk_steam_client_get_steam_id(client);
+    sk_emsg_t msg_type = (steam_id && sk_steam_id_to_uint64(steam_id) != 0)
+        ? SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT
+        : SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED;
     uint8_t* body = sk_unified_request_sync(client, "Authentication", "PollAuthSessionStatus",
-        packed_buf, packed_size, &body_len, &eresult, 30000, SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT);
+        packed_buf, packed_size, &body_len, &eresult, 30000, msg_type);
     free(packed_buf);
     sk_steam_unified_messages_remove_service(um, "Authentication");
 
@@ -285,7 +289,7 @@ void sk_steam_authentication_destroy(sk_steam_authentication_t* auth) {
     free(auth);
 }
 
-static char* sk_fetch_password_rsa_key(sk_steam_client_t* client, const char* account_name, char** out_mod, char** out_exp, uint64_t* out_timestamp) {
+char* sk_fetch_password_rsa_key(sk_steam_client_t* client, const char* account_name, char** out_mod, char** out_exp, uint64_t* out_timestamp) {
     if (!client || !account_name || !out_mod || !out_exp || !out_timestamp) return NULL;
     *out_mod = NULL;
     *out_exp = NULL;

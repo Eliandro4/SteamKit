@@ -4,14 +4,15 @@
 #include "steamkit/steam/callbacks.h"
 #include "steamkit/steam/steam_client/callback_mgr/callback_mgr.h"
 #include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/steam/handlers/client_msg_protobuf.h"
 #include "steamkit/steam/steam_client/configuration/steam_configuration.h"
-#include "steamkit/networking/envelope_encrypted_connection.h"
 #include "steamkit/utils/debug_log.h"
 #include "steamkit/utils/lancache.h"
 #include "steamkit/utils/http_client.h"
 #include "steamkit/utils/crypto_helper.h"
 #include "steamkit/networking/tcp_connection.h"
 #include "steamkit/networking/websocket_connection.h"
+#include "steammessages_clientserver_login.pb-c.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -61,30 +62,21 @@ struct sk_cm_client {
     uint32_t cell_id;
     sk_channel_encryption_state_t encryption_state;
     uint8_t session_key[32];
-    sk_envelope_encrypted_connection_t* envelope;
     bool user_notified_connected;
 };
 
 static void sk_cm_client_handle_msg(sk_cm_client_t* client, sk_emsg_t msg, const uint8_t* data, size_t len);
 
 static uint8_t* sk_cm_client_decrypt_payload(sk_cm_client_t* client, const uint8_t* data, size_t len, size_t* out_len) {
-    if (!client || !data || len == 0 || !out_len) return NULL;
-    sk_envelope_encrypted_connection_t* enc = sk_envelope_encrypted_connection_create(NULL);
-    if (!enc) return NULL;
-    sk_envelope_encrypted_connection_set_key(enc, client->session_key, sizeof(client->session_key));
-    uint8_t* decrypted = sk_envelope_encrypted_connection_decrypt(enc, data, len, out_len);
-    sk_envelope_encrypted_connection_destroy(enc);
-    return decrypted;
+    if (!client || !data || len < 16 || !out_len) return NULL;
+
+    return sk_crypto_symmetric_decrypt_hmac_iv(data, len, client->session_key, sizeof(client->session_key), out_len);
 }
 
 static uint8_t* sk_cm_client_encrypt_payload(sk_cm_client_t* client, const uint8_t* data, size_t len, size_t* out_len) {
     if (!client || !data || len == 0 || !out_len) return NULL;
-    sk_envelope_encrypted_connection_t* enc = sk_envelope_encrypted_connection_create(NULL);
-    if (!enc) return NULL;
-    sk_envelope_encrypted_connection_set_key(enc, client->session_key, sizeof(client->session_key));
-    uint8_t* encrypted = sk_envelope_encrypted_connection_encrypt(enc, data, len, out_len);
-    sk_envelope_encrypted_connection_destroy(enc);
-    return encrypted;
+
+    return sk_crypto_symmetric_encrypt_hmac_iv(data, len, client->session_key, sizeof(client->session_key), out_len);
 }
 
 static void sk_cm_client_net_msg_cb(void* user_data, const uint8_t* data, size_t len, sk_emsg_t msg) {
@@ -97,6 +89,10 @@ static void sk_cm_client_net_msg_cb(void* user_data, const uint8_t* data, size_t
     sk_emsg_t parsed_msg = msg;
 
     if (client->encryption_state == SK_CHANNEL_ENCRYPTION_CONNECTED) {
+        if (len < 16) {
+            sk_debug_log_warn("CMClient", "Encrypted packet too short len=%zu", len);
+            return;
+        }
         decrypted_buf = sk_cm_client_decrypt_payload(client, data, len, &payload_len);
         if (!decrypted_buf) {
             sk_debug_log_warn("CMClient", "Failed to decrypt incoming packet len=%zu", len);
@@ -160,39 +156,34 @@ static const uint8_t sk_steam_public_key_public[] = {
 
 static void sk_cm_client_handle_channel_encrypt_request(sk_cm_client_t* client, const uint8_t* data, size_t len) {
     if (!client || !data || len < 24) return;
-    fprintf(stderr, "[cm] CHANNEL_ENCRYPT_REQUEST: raw_len=%zu hex=", len);
-    for (size_t i = 0; i < len && i < 64; i++) fprintf(stderr, "%02X", data[i]);
-    fprintf(stderr, "\n");
+    sk_debug_log_info("CMClient", "CHANNEL_ENCRYPT_REQUEST raw_len=%zu", len);
 
     const uint8_t* body = data + 20;
     size_t body_len = len < 20 ? 0 : len - 20;
-    fprintf(stderr, "[cm] CHANNEL_ENCRYPT_REQUEST: body_len=%zu body_hex=", body_len);
-    for (size_t i = 0; i < body_len && i < 64; i++) fprintf(stderr, "%02X", body[i]);
-    fprintf(stderr, "\n");
+    if (body_len < 8) return;
 
     uint32_t protocol_version = (uint32_t)body[0] | ((uint32_t)body[1] << 8) | ((uint32_t)body[2] << 16) | ((uint32_t)body[3] << 24);
     int32_t universe = (int32_t)((uint32_t)body[4] | ((uint32_t)body[5] << 8) | ((uint32_t)body[6] << 16) | ((uint32_t)body[7] << 24));
 
     if (protocol_version != 1 || universe != 1) {
+        sk_debug_log_warn("CMClient", "CHANNEL_ENCRYPT_REQUEST unexpected protocol=%u universe=%d", (unsigned)protocol_version, universe);
         return;
     }
 
     const uint8_t* challenge = body + 8;
     if (body_len < 8 + 16) return;
 
-    uint8_t temp_key[32];
+    uint8_t session_key[32];
     for (int i = 0; i < 32; i++) {
-        temp_key[i] = (uint8_t)rand();
+        session_key[i] = (uint8_t)rand();
     }
-
-    uint8_t blob[48];
-    memcpy(blob, temp_key, 32);
-    memcpy(blob + 32, challenge, 16);
+    memcpy(client->session_key, session_key, sizeof(session_key));
 
     size_t encrypted_len = 0;
     uint8_t* encrypted = NULL;
 #ifdef SK_ENABLE_CURL
-    encrypted = sk_crypto_rsa_encrypt_oaep_sha1(blob, sizeof(blob), sk_steam_public_key_public, sizeof(sk_steam_public_key_public), &encrypted_len);
+    encrypted = sk_crypto_rsa_encrypt_oaep_sha1(session_key, sizeof(session_key),
+        sk_steam_public_key_public, sizeof(sk_steam_public_key_public), &encrypted_len);
 #endif
     if (!encrypted || encrypted_len == 0) {
         sk_debug_log_warn("CMClient", "RSA encryption failed for CHANNEL_ENCRYPT_RESPONSE");
@@ -202,36 +193,44 @@ static void sk_cm_client_handle_channel_encrypt_request(sk_cm_client_t* client, 
     uint32_t key_size = (uint32_t)encrypted_len;
     uint32_t crc = sk_crypto_crc32(encrypted, encrypted_len);
 
-    uint8_t response[4 + 4 + encrypted_len + 4 + 4];
     uint32_t resp_protocol_version = 1;
-    memcpy(response, &resp_protocol_version, 4);
-    memcpy(response + 4, &key_size, 4);
-    memcpy(response + 8, encrypted, encrypted_len);
-    memcpy(response + 8 + encrypted_len, &crc, 4);
+    size_t resp_body_len = 4 + 4 + encrypted_len + 4 + 4;
+    uint8_t* resp_body = (uint8_t*)malloc(resp_body_len);
+    if (!resp_body) {
+        free(encrypted);
+        return;
+    }
+    memcpy(resp_body, &resp_protocol_version, 4);
+    memcpy(resp_body + 4, &key_size, 4);
+    memcpy(resp_body + 8, encrypted, encrypted_len);
+    memcpy(resp_body + 8 + encrypted_len, &crc, 4);
     uint32_t reserved = 0;
-    memcpy(response + 8 + encrypted_len + 4, &reserved, 4);
+    memcpy(resp_body + 8 + encrypted_len + 4, &reserved, 4);
 
-    sk_packet_msg_t* pkt = sk_packet_msg_create(SK_EMSG_CHANNEL_ENCRYPT_RESPONSE, false);
-    if (pkt) {
-        sk_packet_msg_set_data(pkt, response, sizeof(response));
-        sk_steam_client_send(client->steam_client, pkt);
-        sk_debug_log_info("CMClient", "Sent CHANNEL_ENCRYPT_RESPONSE len=%zu", sizeof(response));
-        sk_packet_msg_destroy(pkt);
-    } else {
-        sk_debug_log_warn("CMClient", "Failed to create CHANNEL_ENCRYPT_RESPONSE packet");
+    sk_client_msg_t* client_msg = sk_client_msg_create(SK_EMSG_CHANNEL_ENCRYPT_RESPONSE, false);
+    if (client_msg) {
+        sk_client_msg_set_data(client_msg, resp_body, resp_body_len);
+        sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg(client_msg);
+        if (pkt) {
+            size_t pkt_len = 0;
+            const uint8_t* pkt_data = sk_packet_msg_data(pkt, &pkt_len);
+            if (pkt_data && pkt_len > 0) {
+                sk_connection_send(client->connection, pkt_data, pkt_len);
+            }
+            sk_packet_msg_destroy(pkt);
+        }
+        sk_client_msg_destroy(client_msg);
     }
 
-    memcpy(client->session_key, temp_key, 32);
-    client->encryption_state = SK_CHANNEL_ENCRYPTION_HANDSHAKE;
-
+    free(resp_body);
     free(encrypted);
+
+    client->encryption_state = SK_CHANNEL_ENCRYPTION_HANDSHAKE;
+    sk_debug_log_info("CMClient", "Sent CHANNEL_ENCRYPT_RESPONSE len=%zu", resp_body_len + 20);
 }
 
 static void sk_cm_client_handle_channel_encrypt_result(sk_cm_client_t* client, const uint8_t* data, size_t len) {
     if (!client || !data || len < 4) return;
-    fprintf(stderr, "[cm] CHANNEL_ENCRYPT_RESULT raw_len=%zu\n", len);
-    for (size_t i = 0; i < len && i < 32; i++) fprintf(stderr, "%02X", data[i]);
-    fprintf(stderr, "\n");
 
     uint32_t result = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
     sk_debug_log_info("CMClient", "CHANNEL_ENCRYPT_RESULT result=%u", (unsigned)result);
@@ -278,10 +277,6 @@ sk_cm_client_t* sk_cm_client_create(sk_steam_configuration_t* config, const char
 void sk_cm_client_destroy(sk_cm_client_t* client) {
     if (!client) return;
     sk_cm_client_disconnect(client, true);
-    if (client->envelope) {
-        sk_envelope_encrypted_connection_destroy(client->envelope);
-        client->envelope = NULL;
-    }
     for (size_t i = 0; i < client->server_list.count; ++i) {
         free((char*)client->server_list.servers[i].host);
     }
@@ -430,10 +425,6 @@ void sk_cm_client_disconnect(sk_cm_client_t* client, bool user_initiated) {
     client->connected = false;
     client->encryption_state = SK_CHANNEL_ENCRYPTION_NONE;
     client->user_notified_connected = false;
-    if (client->envelope) {
-        sk_envelope_encrypted_connection_destroy(client->envelope);
-        client->envelope = NULL;
-    }
     if (was_connected && client->callback_fn) {
         sk_disconnected_callback_t* cb = sk_disconnected_callback_create(user_initiated);
         if (cb) {
@@ -478,13 +469,63 @@ void sk_cm_client_set_steam_client(sk_cm_client_t* client, sk_steam_client_t* st
     }
 }
 
+void sk_cm_client_set_steam_id(sk_cm_client_t* client, const sk_steam_id_t* steam_id) {
+    if (!client) return;
+    free(client->steam_id);
+    client->steam_id = steam_id ? sk_steam_id_clone(steam_id) : NULL;
+}
+
 sk_steam_client_t* sk_cm_client_get_steam_client(const sk_cm_client_t* client) {
     return client ? client->steam_client : NULL;
+}
+
+static void sk_cm_client_send_client_hello(sk_cm_client_t* client) {
+    if (!client || !client->connection) return;
+
+    CMsgClientHello hello = CMSG_CLIENT_HELLO__INIT;
+    hello.has_protocol_version = true;
+    hello.protocol_version = 65581;
+
+    CMsgProtoBufHeader proto_hdr;
+    cmsg_proto_buf_header__init(&proto_hdr);
+    if (client->steam_id) {
+        proto_hdr.has_steamid = true;
+        proto_hdr.steamid = client->steam_id->steamid;
+    }
+    proto_hdr.has_client_sessionid = true;
+    proto_hdr.client_sessionid = 0;
+
+    size_t hello_size = cmsg_client_hello__get_packed_size(&hello);
+    size_t hdr_size = cmsg_proto_buf_header__get_packed_size(&proto_hdr);
+    size_t total_size = hdr_size + hello_size;
+
+    uint8_t* packed_buf = (uint8_t*)malloc(total_size);
+    if (!packed_buf) return;
+
+    cmsg_proto_buf_header__pack(&proto_hdr, packed_buf);
+    cmsg_client_hello__pack(&hello, packed_buf + hdr_size);
+
+    sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(9805);
+    if (!msg) {
+        free(packed_buf);
+        return;
+    }
+
+    sk_client_msg_protobuf_set_body(msg, packed_buf, total_size);
+    sk_packet_msg_t* pkt = sk_packet_msg_create_from_client_msg_protobuf(msg);
+    if (pkt) {
+        sk_steam_client_send(client->steam_client, pkt);
+        sk_packet_msg_destroy(pkt);
+    }
+
+    sk_client_msg_protobuf_destroy(msg);
+    free(packed_buf);
 }
 
 void sk_cm_client_on_connected(sk_cm_client_t* client) {
     if (!client) return;
     client->connected = true;
+    sk_cm_client_send_client_hello(client);
     if (client->callback_fn) {
         sk_connected_callback_t* cb = sk_connected_callback_create();
         if (cb) {

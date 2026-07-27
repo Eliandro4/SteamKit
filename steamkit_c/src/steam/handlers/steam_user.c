@@ -4,10 +4,11 @@
 #include "steamkit/steam/handlers/steam_unified_messages.h"
 #include "steamkit/steam/steam_client.h"
 #include "steamkit/steam/callbacks.h"
+#include "steamkit/types/steam_id.h"
 #include "steamkit/utils/debug_log.h"
 #include "steamkit/utils/msg_util.h"
-#include "steamkit/utils/crypto_helper.h"
 #include "steamkit/utils/net_helpers.h"
+#include "steamkit/utils/crypto_helper.h"
 #include "steamkit/base/generated/steam_msg_user.h"
 #include "steamkit/steam/handlers/client_msg_protobuf.h"
 #include "steamkit/steam/authentication/steam_authentication.h"
@@ -18,8 +19,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <pthread.h>
-#include <time.h>
 #include <unistd.h>
 
 static char* sk_strdup(const char* s) {
@@ -67,93 +66,6 @@ static CMsgIPAddress* sk_create_obfuscated_private_ip(uint32_t login_id) {
         ip->v4 = local_ip ^ 0xBAADF00D;
     }
     return ip;
-}
-
-static bool sk_logon_use_rsa_encryption(const sk_log_on_details_t* details) {
-    return details
-        && !details->access_token
-        && details->password && details->password[0]
-        && sk_crypto_is_available();
-}
-
-typedef struct {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    bool done;
-    char* public_key;
-} sk_rsa_req_ctx_t;
-
-static void sk_rsa_response_cb(void* user_data, const uint8_t* body, size_t body_len, uint32_t eresult) {
-    (void)eresult;
-    sk_rsa_req_ctx_t* ctx = (sk_rsa_req_ctx_t*)user_data;
-    if (body && body_len > 0) {
-        CAuthenticationGetPasswordRSAPublicKeyResponse* resp =
-            cauthentication__get_password_rsapublic_key__response__unpack(NULL, body_len, body);
-        if (resp) {
-            if (resp->publickey_mod && resp->publickey_exp) {
-                size_t len = strlen(resp->publickey_mod) + 1 + strlen(resp->publickey_exp) + 1;
-                ctx->public_key = (char*)malloc(len);
-                if (ctx->public_key) {
-                    snprintf(ctx->public_key, len, "%s|%s", resp->publickey_mod, resp->publickey_exp);
-                }
-            }
-            cauthentication__get_password_rsapublic_key__response__free_unpacked(resp, NULL);
-        }
-    }
-    pthread_mutex_lock(&ctx->mutex);
-    ctx->done = true;
-    pthread_cond_signal(&ctx->cond);
-    pthread_mutex_unlock(&ctx->mutex);
-    sk_debug_log_info("SteamUser", "RSA key fetch response received, public_key=%s", ctx->public_key ? "set" : "NULL");
-}
-
-static char* sk_steam_user_fetch_rsa_key(sk_steam_client_t* client, const char* account_name) {
-    if (!client || !account_name) return NULL;
-
-    sk_steam_unified_messages_t* um = sk_steam_client_get_unified_messages(client);
-    if (!um) return NULL;
-
-    sk_unified_service_t* svc = sk_steam_unified_messages_create_service(um, "Authentication");
-    if (!svc) return NULL;
-
-    CAuthenticationGetPasswordRSAPublicKeyRequest req = CAUTHENTICATION__GET_PASSWORD_RSAPUBLIC_KEY__REQUEST__INIT;
-    req.account_name = (char*)account_name;
-
-    size_t packed_size = cauthentication__get_password_rsapublic_key__request__get_packed_size(&req);
-    uint8_t* packed_buf = (uint8_t*)malloc(packed_size);
-    if (!packed_buf) {
-        sk_steam_unified_messages_remove_service(um, "Authentication");
-        return NULL;
-    }
-    cauthentication__get_password_rsapublic_key__request__pack(&req, packed_buf);
-
-    sk_rsa_req_ctx_t ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    pthread_mutex_init(&ctx.mutex, NULL);
-    pthread_cond_init(&ctx.cond, NULL);
-
-    sk_steam_unified_messages_send_request_ex(um, svc, "GetPasswordRSAPublicKey", packed_buf, packed_size, 0,
-        sk_rsa_response_cb, &ctx, SK_EMSG_SERVICE_METHOD_CALL_FROM_CLIENT_NON_AUTHED);
-
-    free(packed_buf);
-
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += 10;
-
-    pthread_mutex_lock(&ctx.mutex);
-    while (!ctx.done) {
-        if (pthread_cond_timedwait(&ctx.cond, &ctx.mutex, &ts) != 0) {
-            break;
-        }
-    }
-    pthread_mutex_unlock(&ctx.mutex);
-
-    pthread_mutex_destroy(&ctx.mutex);
-    pthread_cond_destroy(&ctx.cond);
-
-    sk_steam_unified_messages_remove_service(um, "Authentication");
-    return ctx.public_key;
 }
 
 typedef struct sk_steam_user {
@@ -218,8 +130,16 @@ static void sk_steam_user_handle_msg(struct sk_client_msg_handler* handler, cons
             }
             if (resp) {
                 sk_logged_on_callback_t* cb = sk_logged_on_callback_create(resp->eresult);
-                if (cb && user->base.client) {
-                    sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_LOGGED_ON, 0, cb);
+                if (cb) {
+                    cb->extended_result = resp->has_eresult_extended ? resp->eresult_extended : 0;
+                    if (resp->has_client_supplied_steamid && user->base.client) {
+                        sk_steam_id_t* sid = sk_steam_id_create(resp->client_supplied_steamid);
+                        sk_cm_client_set_steam_id(sk_steam_client_get_cm_client(user->base.client), sid);
+                        cb->client_steam_id = sid;
+                    }
+                    if (user->base.client) {
+                        sk_steam_client_post_callback(user->base.client, SK_CLIENT_CALLBACK_LOGGED_ON, 0, cb);
+                    }
                 }
                 cmsg_client_logon_response__free_unpacked(resp, NULL);
             }
@@ -307,6 +227,7 @@ void sk_log_on_details_destroy(sk_log_on_details_t* details) {
     free(details->two_factor_code);
     free(details->access_token);
     free(details->machine_name);
+    free(details->guard_data);
     free(details);
 }
 
@@ -328,38 +249,21 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
     user->logon_details->access_token = details->access_token ? sk_strdup(details->access_token) : NULL;
     user->logon_details->account_instance = details->account_instance ? details->account_instance : 1;
     user->logon_details->machine_name = details->machine_name ? sk_strdup(details->machine_name) : NULL;
+    user->logon_details->guard_data = details->guard_data ? sk_strdup(details->guard_data) : NULL;
+    user->logon_details->authenticator = details->authenticator;
 
     if (!user->base.client) {
         sk_debug_log_warn("SteamUser", "No SteamClient attached, cannot send logon message.");
         return;
     }
 
-    char* encrypted_password = NULL;
-    if (sk_logon_use_rsa_encryption(user->logon_details)) {
-        char* pub_key = sk_steam_user_fetch_rsa_key(user->base.client, user->logon_details->username);
-        if (pub_key) {
-            size_t enc_len = 0;
-            uint8_t* enc = sk_crypto_rsa_encrypt((const uint8_t*)user->logon_details->password,
-                strlen(user->logon_details->password), (const uint8_t*)pub_key, strlen(pub_key), &enc_len);
-            if (enc) {
-                encrypted_password = sk_crypto_base64_encode(enc, enc_len);
-                free(enc);
-                sk_debug_log_info("SteamUser", "Password encrypted with RSA public key");
-            } else {
-                sk_debug_log_warn("SteamUser", "RSA encryption failed for password");
-                free(pub_key);
-                return;
-            }
-            free(pub_key);
-        } else {
-            sk_debug_log_warn("SteamUser", "Failed to fetch RSA public key, cannot send logon");
-            return;
-        }
+    if (!sk_steam_client_is_connected(user->base.client)) {
+        sk_debug_log_warn("SteamUser", "SteamClient is not connected, cannot send logon message.");
+        return;
     }
 
     sk_client_msg_protobuf_t* msg = sk_client_msg_protobuf_create(SK_EMSG_CLIENT_LOG_ON);
     if (!msg) {
-        free(encrypted_password);
         return;
     }
 
@@ -375,7 +279,7 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
 
     CMsgClientLogon logon_msg = CMSG_CLIENT_LOGON__INIT;
     logon_msg.account_name = user->logon_details->username;
-    logon_msg.password = encrypted_password ? encrypted_password : user->logon_details->password;
+    logon_msg.password = user->logon_details->password;
     
     if (user->logon_details->machine_name) {
         logon_msg.machine_name = user->logon_details->machine_name;
@@ -398,7 +302,7 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
         logon_msg.auth_code = user->logon_details->auth_code;
     }
 
-    logon_msg.protocol_version = 65580;
+    logon_msg.protocol_version = 65581;
     logon_msg.has_protocol_version = true;
     logon_msg.client_os_type = sk_get_os_type();
     logon_msg.has_client_os_type = true;
@@ -450,10 +354,113 @@ void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* deta
     }
     
     sk_client_msg_protobuf_destroy(msg);
-    free(encrypted_password);
     free(machine_id);
     free(obf_ip);
     sk_debug_log_info("SteamUser", "Logon message sent for user: %s", details->username ? details->username : "(null)");
+}
+
+void sk_steam_user_log_on_with_password(sk_steam_user_t* user, const char* username, const char* password, sk_authenticator_t authenticator) {
+    if (!user || !username || !password) return;
+    if (!user->base.client) {
+        sk_debug_log_warn("SteamUser", "No SteamClient attached, cannot authenticate.");
+        return;
+    }
+    if (!sk_steam_client_is_connected(user->base.client)) {
+        sk_debug_log_warn("SteamUser", "SteamClient is not connected, cannot authenticate.");
+        return;
+    }
+
+    sk_steam_authentication_t* auth = sk_steam_authentication_create(user->base.client);
+    if (!auth) {
+        sk_debug_log_warn("SteamUser", "Failed to create authentication handler.");
+        return;
+    }
+
+    char* mod = NULL;
+    char* exp = NULL;
+    uint64_t rsa_timestamp = 0;
+    char* pub_key = sk_fetch_password_rsa_key(user->base.client, username, &mod, &exp, &rsa_timestamp);
+    if (!pub_key) {
+        sk_debug_log_warn("SteamUser", "Failed to fetch RSA public key.");
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+
+    size_t enc_len = 0;
+    uint8_t* enc = sk_crypto_rsa_encrypt((const uint8_t*)password, strlen(password), (const uint8_t*)pub_key, strlen(pub_key), &enc_len);
+    if (!enc) {
+        sk_debug_log_warn("SteamUser", "RSA encryption of password failed.");
+        free(pub_key);
+        free(mod);
+        free(exp);
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+    char* encrypted_password = sk_crypto_base64_encode(enc, enc_len);
+    free(enc);
+    free(pub_key);
+    free(mod);
+    free(exp);
+    if (!encrypted_password) {
+        sk_debug_log_warn("SteamUser", "Base64 encoding of encrypted password failed.");
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+
+    sk_auth_session_details_t* details = sk_auth_session_details_create(username, password);
+    if (!details) {
+        sk_debug_log_warn("SteamUser", "Failed to create auth session details.");
+        free(encrypted_password);
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+    details->authenticator = authenticator;
+    if (rsa_timestamp != 0) {
+        details->guard_data = (char*)malloc(32);
+        if (details->guard_data) {
+            snprintf(details->guard_data, 32, "%llu", (unsigned long long)rsa_timestamp);
+        }
+    }
+
+    sk_credentials_auth_session_t* session = sk_auth_begin_session_via_credentials(auth, details);
+    sk_auth_session_details_destroy(details);
+    if (!session) {
+        sk_debug_log_warn("SteamUser", "Failed to begin auth session via credentials.");
+        free(encrypted_password);
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+
+    sk_auth_poll_result_t* result = sk_credentials_auth_session_poll_wait_for_result(session);
+    sk_credentials_auth_session_destroy(session);
+    free(encrypted_password);
+
+    if (!result || !result->access_token) {
+        sk_debug_log_warn("SteamUser", "Authentication failed or no access token received.");
+        sk_auth_poll_result_destroy(result);
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+
+    sk_log_on_details_t* logon_details = sk_log_on_details_create();
+    if (!logon_details) {
+        sk_debug_log_warn("SteamUser", "Failed to create logon details.");
+        sk_auth_poll_result_destroy(result);
+        sk_steam_authentication_destroy(auth);
+        return;
+    }
+    logon_details->username = sk_strdup(username);
+    logon_details->access_token = sk_strdup(result->access_token);
+    if (result->refresh_token) {
+        logon_details->password = sk_strdup(result->refresh_token);
+    }
+    logon_details->should_remember_password = true;
+
+    sk_steam_user_log_on(user, logon_details);
+    sk_log_on_details_destroy(logon_details);
+    sk_auth_poll_result_destroy(result);
+    sk_steam_authentication_destroy(auth);
+    sk_debug_log_info("SteamUser", "Authentication successful, logon sent for user: %s", username);
 }
 
 void sk_steam_user_log_off(sk_steam_user_t* user) {

@@ -13,6 +13,7 @@
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/x509.h>
+#include <openssl/rand.h>
 
 static uint8_t* sk_crypto_aes_cbc_decrypt_internal(const uint8_t* input, size_t input_len,
                                                     const uint8_t* key, size_t key_len,
@@ -142,6 +143,206 @@ uint8_t* sk_crypto_aes_ecb_encrypt(const uint8_t* input, size_t input_len,
 
     if (out_len) *out_len = (size_t)len;
     return output;
+}
+
+uint8_t* sk_crypto_aes_ecb_decrypt(const uint8_t* input, size_t input_len,
+                                    const uint8_t* key, size_t key_len,
+                                    size_t* out_len) {
+    if (!input || !key || key_len != 32 || input_len % 16 != 0) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t* output = malloc(input_len);
+    if (!output) {
+        EVP_CIPHER_CTX_free(ctx);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    EVP_DecryptInit_ex(ctx, EVP_aes_256_ecb(), NULL, key, NULL);
+    EVP_CIPHER_CTX_set_padding(ctx, 0);
+
+    int len = 0;
+    EVP_DecryptUpdate(ctx, output, &len, input, (int)input_len);
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    if (out_len) *out_len = (size_t)len;
+    return output;
+}
+
+static uint8_t* sk_crypto_aes_cbc_encrypt_internal(const uint8_t* input, size_t input_len,
+                                                    const uint8_t* key, size_t key_len,
+                                                    const uint8_t* iv, size_t iv_len,
+                                                    size_t* out_len) {
+    if (!input || !key || key_len != 32 || !iv || iv_len != 16 || input_len == 0) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t* output = malloc(input_len + 16);
+    if (!output) {
+        EVP_CIPHER_CTX_free(ctx);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
+    EVP_CIPHER_CTX_set_padding(ctx, 1);
+
+    int len = 0;
+    EVP_EncryptUpdate(ctx, output, &len, input, (int)input_len);
+
+    int final_len = 0;
+    EVP_EncryptFinal_ex(ctx, output + len, &final_len);
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    if (out_len) *out_len = (size_t)(len + final_len);
+    return output;
+}
+
+uint8_t* sk_crypto_symmetric_encrypt_hmac_iv(const uint8_t* input, size_t input_len,
+                                              const uint8_t* key, size_t key_len,
+                                              size_t* out_len) {
+    if (!input || !key || key_len != 32 || input_len == 0) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t iv[16];
+    uint8_t random_bytes[3];
+    if (RAND_bytes(random_bytes, 3) != 1) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t hmac_key[16];
+    memcpy(hmac_key, key, 16);
+
+    size_t hmac_buf_len = 3 + input_len;
+    uint8_t* hmac_buf = (uint8_t*)malloc(hmac_buf_len);
+    if (!hmac_buf) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    memcpy(hmac_buf, random_bytes, 3);
+    memcpy(hmac_buf + 3, input, input_len);
+
+    uint8_t hmac_result[20];
+    unsigned int hmac_len = 0;
+    HMAC(EVP_sha1(), hmac_key, 16, hmac_buf, (int)hmac_buf_len, hmac_result, &hmac_len);
+    free(hmac_buf);
+
+    if (hmac_len != 20) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    memcpy(iv, hmac_result, 13);
+    memcpy(iv + 13, random_bytes, 3);
+
+    size_t encrypted_iv_len = 0;
+    uint8_t* encrypted_iv = sk_crypto_aes_ecb_encrypt(iv, 16, key, key_len, &encrypted_iv_len);
+    if (!encrypted_iv) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    size_t ciphertext_len = 0;
+    uint8_t* ciphertext = sk_crypto_aes_cbc_encrypt_internal(input, input_len, key, key_len, iv, 16, &ciphertext_len);
+    if (!ciphertext) {
+        free(encrypted_iv);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    size_t total_len = 16 + ciphertext_len;
+    uint8_t* result = (uint8_t*)malloc(total_len);
+    if (!result) {
+        free(encrypted_iv);
+        free(ciphertext);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    memcpy(result, encrypted_iv, 16);
+    memcpy(result + 16, ciphertext, ciphertext_len);
+    free(encrypted_iv);
+    free(ciphertext);
+
+    if (out_len) *out_len = total_len;
+    return result;
+}
+
+uint8_t* sk_crypto_symmetric_decrypt_hmac_iv(const uint8_t* input, size_t input_len,
+                                              const uint8_t* key, size_t key_len,
+                                              size_t* out_len) {
+    if (!input || input_len < 16 || !key || key_len != 32) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    size_t encrypted_iv_len = 0;
+    uint8_t* encrypted_iv = sk_crypto_aes_ecb_decrypt(input, 16, key, key_len, &encrypted_iv_len);
+    if (!encrypted_iv || encrypted_iv_len != 16) {
+        free(encrypted_iv);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t iv[16];
+    memcpy(iv, encrypted_iv, 16);
+    free(encrypted_iv);
+
+    uint8_t random_bytes[3];
+    memcpy(random_bytes, iv + 13, 3);
+
+    size_t plaintext_len = 0;
+    uint8_t* plaintext = sk_crypto_aes_cbc_decrypt_internal(input + 16, input_len - 16, key, key_len, iv, 16, &plaintext_len);
+    if (!plaintext) {
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    uint8_t hmac_key[16];
+    memcpy(hmac_key, key, 16);
+
+    size_t hmac_buf_len = 3 + plaintext_len;
+    uint8_t* hmac_buf = (uint8_t*)malloc(hmac_buf_len);
+    if (!hmac_buf) {
+        free(plaintext);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+    memcpy(hmac_buf, random_bytes, 3);
+    memcpy(hmac_buf + 3, plaintext, plaintext_len);
+
+    uint8_t hmac_result[20];
+    unsigned int hmac_len = 0;
+    HMAC(EVP_sha1(), hmac_key, 16, hmac_buf, (int)hmac_buf_len, hmac_result, &hmac_len);
+    free(hmac_buf);
+
+    if (hmac_len != 20 || memcmp(hmac_result, iv, 13) != 0) {
+        free(plaintext);
+        if (out_len) *out_len = 0;
+        return NULL;
+    }
+
+    if (out_len) *out_len = plaintext_len;
+    return plaintext;
 }
 
 uint8_t* sk_crypto_hmac_sha1(const uint8_t* key, size_t key_len,

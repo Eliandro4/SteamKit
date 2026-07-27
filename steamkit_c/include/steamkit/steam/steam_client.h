@@ -42,6 +42,8 @@ typedef enum sk_client_callback_type {
     SK_CLIENT_CALLBACK_SERVICE_METHOD_RESPONSE,
     SK_CLIENT_CALLBACK_GC_MESSAGE,
     SK_CLIENT_CALLBACK_LOBBY_MATCHMAKING,
+    SK_CLIENT_CALLBACK_AUTH_CODE_REQUIRED,
+    SK_CLIENT_CALLBACK_AUTH_RESULT,
 } sk_client_callback_type_t;
 
 // SteamClient - mirrors C# SteamClient (the main entry point)
@@ -72,6 +74,12 @@ sk_job_id_t* sk_steam_client_get_next_job_id(sk_steam_client_t* client);
 // Checks if the client is connected
 bool sk_steam_client_is_connected(const sk_steam_client_t* client);
 bool sk_steam_client_is_channel_ready(const sk_steam_client_t* client);
+
+// Gets the SteamID of the logged-in user (NULL if not logged in)
+const sk_steam_id_t* sk_steam_client_get_steam_id(const sk_steam_client_t* client);
+
+// Gets the underlying CM client
+sk_cm_client_t* sk_steam_client_get_cm_client(sk_steam_client_t* client);
 
 // Registers a handler
 void sk_steam_client_add_handler(struct sk_steam_client* client, struct sk_client_msg_handler* handler);

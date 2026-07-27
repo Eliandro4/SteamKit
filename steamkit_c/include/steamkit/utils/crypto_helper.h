@@ -9,21 +9,38 @@
 extern "C" {
 #endif
 
-// Symmetric decryption using AES/CBC/PKCS7 with ECB prepended IV
-// Returns a newly allocated buffer that must be freed by the caller
-uint8_t* sk_crypto_symmetric_decrypt(const uint8_t* input, size_t input_len, 
-                                     const uint8_t* key, size_t key_len,
-                                     size_t* out_len);
-
 // Symmetric encryption using AES/CBC/PKCS7
 uint8_t* sk_crypto_symmetric_encrypt(const uint8_t* input, size_t input_len,
-                                     const uint8_t* key, size_t key_len,
-                                     size_t* out_len);
+                                      const uint8_t* key, size_t key_len,
+                                      size_t* out_len);
+
+// Symmetric decryption using AES/CBC/PKCS7 (expects raw IV prepended)
+uint8_t* sk_crypto_symmetric_decrypt(const uint8_t* input, size_t input_len,
+                                      const uint8_t* key, size_t key_len,
+                                      size_t* out_len);
+
+// Symmetric encryption using AES/CBC/PKCS7 with HMAC-IV (Steam channel encryption)
+// Output format: ECB(IV) || CBC(plaintext, IV)
+uint8_t* sk_crypto_symmetric_encrypt_hmac_iv(const uint8_t* input, size_t input_len,
+                                              const uint8_t* key, size_t key_len,
+                                              size_t* out_len);
+
+// Symmetric decryption using AES/CBC/PKCS7 with HMAC-IV (Steam channel encryption)
+// Input format: ECB(IV) || CBC(ciphertext, IV)
+// Validates HMAC before returning plaintext
+uint8_t* sk_crypto_symmetric_decrypt_hmac_iv(const uint8_t* input, size_t input_len,
+                                              const uint8_t* key, size_t key_len,
+                                              size_t* out_len);
 
 // AES encryption using ECB mode (for IV encryption)
 uint8_t* sk_crypto_aes_ecb_encrypt(const uint8_t* input, size_t input_len,
-                                    const uint8_t* key, size_t key_len,
-                                    size_t* out_len);
+                                     const uint8_t* key, size_t key_len,
+                                     size_t* out_len);
+
+// AES decryption using ECB mode (for IV decryption)
+uint8_t* sk_crypto_aes_ecb_decrypt(const uint8_t* input, size_t input_len,
+                                     const uint8_t* key, size_t key_len,
+                                     size_t* out_len);
 
 // HMAC-SHA1
 uint8_t* sk_crypto_hmac_sha1(const uint8_t* key, size_t key_len,

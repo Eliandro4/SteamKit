@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "steamkit/steam/handlers/client_msg_handler.h"
+#include "steamkit/steam/authentication/steam_authentication.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,8 @@ typedef struct sk_log_on_details {
     uint64_t steam_id;
     uint32_t account_instance;
     char* machine_name;
+    char* guard_data;
+    sk_authenticator_t authenticator;
 } sk_log_on_details_t;
 
 sk_log_on_details_t* sk_log_on_details_create(void);
@@ -40,6 +43,9 @@ sk_steam_user_t* sk_steam_user_create(void);
 
 // Logs on with given details
 void sk_steam_user_log_on(sk_steam_user_t* user, const sk_log_on_details_t* details);
+
+// Logs on with username/password using the Authentication service
+void sk_steam_user_log_on_with_password(sk_steam_user_t* user, const char* username, const char* password, sk_authenticator_t authenticator);
 
 // Logs off
 void sk_steam_user_log_off(sk_steam_user_t* user);

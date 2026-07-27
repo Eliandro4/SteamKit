@@ -161,6 +161,9 @@ uint8_t* sk_auth_poll_auth_session_status(sk_steam_client_t* client,
     uint64_t client_id, const uint8_t* request_id, size_t request_id_len,
     size_t* out_body_len);
 
+// Fetch RSA public key for password encryption
+char* sk_fetch_password_rsa_key(sk_steam_client_t* client, const char* account_name, char** out_mod, char** out_exp, uint64_t* out_timestamp);
+
 // Result lifecycle
 void sk_auth_poll_result_destroy(sk_auth_poll_result_t* result);
 
